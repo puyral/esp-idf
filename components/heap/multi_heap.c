@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: 2015-2021 Espressif Systems (Shanghai) CO LTD
+ * SPDX-FileCopyrightText: 2015-2022 Espressif Systems (Shanghai) CO LTD
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -11,9 +11,13 @@
 #include <stddef.h>
 #include <stdio.h>
 #include <sys/cdefs.h>
-#include "heap_tlsf.h"
-#include <multi_heap.h>
+#include "multi_heap.h"
 #include "multi_heap_internal.h"
+
+#if !CONFIG_HEAP_TLSF_USE_ROM_IMPL
+#include "tlsf.h"
+#include "tlsf_block_functions.h"
+#endif
 
 /* Note: Keep platform-specific parts in this header, this source
    file should depend on libc only */
@@ -22,7 +26,7 @@
 /* Defines compile-time configuration macros */
 #include "multi_heap_config.h"
 
-#ifndef MULTI_HEAP_POISONING
+#if (!defined MULTI_HEAP_POISONING) && (!defined CONFIG_HEAP_TLSF_USE_ROM_IMPL)
 /* if no heap poisoning, public API aliases directly to these implementations */
 void *multi_heap_malloc(multi_heap_handle_t heap, size_t size)
     __attribute__((alias("multi_heap_malloc_impl")));
@@ -74,8 +78,32 @@ typedef struct multi_heap_info {
     size_t free_bytes;
     size_t minimum_free_bytes;
     size_t pool_size;
-    tlsf_t heap_data;
+    void* heap_data;
 } heap_t;
+
+#if CONFIG_HEAP_TLSF_USE_ROM_IMPL
+
+void _multi_heap_lock(void *lock)
+{
+    MULTI_HEAP_LOCK(lock);
+}
+
+void _multi_heap_unlock(void *lock)
+{
+    MULTI_HEAP_UNLOCK(lock);
+}
+
+multi_heap_os_funcs_t multi_heap_os_funcs = {
+    .lock = _multi_heap_lock,
+    .unlock = _multi_heap_unlock,
+};
+
+void multi_heap_in_rom_init(void)
+{
+    multi_heap_os_funcs_init(&multi_heap_os_funcs);
+}
+
+#else // CONFIG_HEAP_TLSF_USE_ROM_IMPL
 
 /* Return true if this block is free. */
 static inline bool is_free(const block_header_t *block)
@@ -201,7 +229,6 @@ void *multi_heap_malloc_impl(multi_heap_handle_t heap, size_t size)
 
 void multi_heap_free_impl(multi_heap_handle_t heap, void *p)
 {
-
     if (heap == NULL || p == NULL) {
         return;
     }
@@ -282,13 +309,46 @@ void *multi_heap_aligned_alloc_impl(multi_heap_handle_t heap, size_t size, size_
     return multi_heap_aligned_alloc_impl_offs(heap, size, alignment, 0);
 }
 
+#ifdef MULTI_HEAP_POISONING
+/*!
+ * @brief Global definition of print_errors set in multi_heap_check() when
+ * MULTI_HEAP_POISONING is active. Allows the transfer of the value to
+ * multi_heap_poisoning.c without having to propagate it to the tlsf submodule
+ * and back.
+ */
+static bool g_print_errors = false;
+
+/*!
+ * @brief Definition of the weak function declared in TLSF repository.
+ * The call of this function execute a check for block poisoning on the memory
+ * chunk passed as parameter.
+ *
+ * @param start: pointer to the start of the memory region to check for corruption
+ * @param size: size of the memory region to check for corruption
+ * @param is_free: indicate if the pattern to use the fill the region should be
+ * an after free or after allocation pattern.
+ *
+ * @return bool: true if the the memory is not corrupted, false if the memory if corrupted.
+ */
+bool tlsf_check_hook(void *start, size_t size, bool is_free)
+{
+    return multi_heap_internal_check_block_poisoning(start, size, is_free, g_print_errors);
+}
+#endif // MULTI_HEAP_POISONING
+
 bool multi_heap_check(multi_heap_handle_t heap, bool print_errors)
 {
-    (void)print_errors;
     bool valid = true;
     assert(heap != NULL);
 
     multi_heap_internal_lock(heap);
+
+#ifdef MULTI_HEAP_POISONING
+    g_print_errors = print_errors;
+#else
+    (void) print_errors;
+#endif
+
     if(tlsf_check(heap->heap_data)) {
         valid = false;
     }
@@ -368,7 +428,7 @@ void multi_heap_get_info_impl(multi_heap_handle_t heap, multi_heap_info_t *info)
 
     multi_heap_internal_lock(heap);
     tlsf_walk_pool(tlsf_get_pool(heap->heap_data), multi_heap_get_info_tlsf, info);
-    /* TLSF has an overhead per block. Calculate the total amoun of overhead, it shall not be
+    /* TLSF has an overhead per block. Calculate the total amount of overhead, it shall not be
      * part of the allocated bytes */
     overhead = info->allocated_blocks * tlsf_alloc_overhead();
     info->total_allocated_bytes = (heap->pool_size - tlsf_size()) - heap->free_bytes - overhead;
@@ -380,3 +440,4 @@ void multi_heap_get_info_impl(multi_heap_handle_t heap, multi_heap_info_t *info)
     }
     multi_heap_internal_unlock(heap);
 }
+#endif

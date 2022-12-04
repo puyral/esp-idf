@@ -15,6 +15,7 @@
 #include "esp_efuse_table.h"
 #include "esp_efuse_utility.h"
 #include "esp_efuse_test_table.h"
+#include "esp_timer.h"
 #include "bootloader_random.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -863,10 +864,4 @@ TEST_CASE("Test chip_ver_pkg APIs return the same value", "[efuse]")
 {
     esp_efuse_utility_update_virt_blocks();
     TEST_ASSERT_EQUAL_INT(esp_efuse_get_pkg_ver(), bootloader_common_get_chip_ver_pkg());
-}
-
-TEST_CASE("Test chip_revision APIs return the same value", "[efuse]")
-{
-    esp_efuse_utility_update_virt_blocks();
-    TEST_ASSERT_EQUAL_INT(esp_efuse_get_chip_ver(), bootloader_common_get_chip_revision());
 }

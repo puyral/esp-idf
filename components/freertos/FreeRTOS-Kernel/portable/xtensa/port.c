@@ -65,9 +65,9 @@
 #include <xtensa/xtensa_context.h>
 #include "soc/soc_caps.h"
 #include "esp_private/crosscore_int.h"
+#include "esp_private/esp_int_wdt.h"
 #include "esp_system.h"
 #include "esp_log.h"
-#include "esp_int_wdt.h"
 #ifdef CONFIG_APPTRACE_ENABLE
 #include "esp_app_trace.h"    /* Required for esp_apptrace_init. [refactor-todo] */
 #endif
@@ -75,6 +75,7 @@
 #include "task.h"            /* Required for TaskHandle_t, tskNO_AFFINITY, and vTaskStartScheduler */
 #include "port_systick.h"
 #include "esp_cpu.h"
+#include "esp_memory_utils.h"
 
 _Static_assert(tskNO_AFFINITY == CONFIG_FREERTOS_NO_AFFINITY, "incorrect tskNO_AFFINITY value");
 
@@ -89,6 +90,15 @@ unsigned port_interruptNesting[portNUM_PROCESSORS] = {0};  // Interrupt nesting 
 BaseType_t port_uxCriticalNesting[portNUM_PROCESSORS] = {0};
 BaseType_t port_uxOldInterruptState[portNUM_PROCESSORS] = {0};
 
+/*
+*******************************************************************************
+* Interrupt stack. The size of the interrupt stack is determined by the config
+* parameter "configISR_STACK_SIZE" in FreeRTOSConfig.h
+*******************************************************************************
+*/
+volatile StackType_t DRAM_ATTR __attribute__((aligned(16))) port_IntStack[portNUM_PROCESSORS][configISR_STACK_SIZE];
+/* One flag for each individual CPU. */
+volatile uint32_t port_switch_flag[portNUM_PROCESSORS];
 
 /* ------------------------------------------------ FreeRTOS Portable --------------------------------------------------
  * - Provides implementation for functions required by FreeRTOS

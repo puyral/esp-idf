@@ -11,10 +11,16 @@
 #include "hal/efuse_hal.h"
 #include "hal/efuse_ll.h"
 
+#define ESP_EFUSE_BLOCK_ERROR_BITS(error_reg, block) ((error_reg) & (0x0F << (4 * (block))))
 
-uint32_t efuse_hal_get_chip_revision(void)
+uint32_t efuse_hal_get_major_chip_version(void)
 {
-    return efuse_ll_get_chip_revision();
+    return efuse_ll_get_chip_wafer_version_major();
+}
+
+uint32_t efuse_hal_get_minor_chip_version(void)
+{
+    return efuse_ll_get_chip_wafer_version_minor();
 }
 
 /******************* eFuse control functions *************************/
@@ -61,3 +67,21 @@ void efuse_hal_rs_calculate(const void *data, void *rs_values)
 }
 
 /******************* eFuse control functions *************************/
+
+bool efuse_hal_is_coding_error_in_block(unsigned block)
+{
+    if (block == 0) {
+        for (unsigned i = 0; i < 5; i++) {
+            if (REG_READ(EFUSE_RD_REPEAT_ERR0_REG + i * 4)) {
+                return true;
+            }
+        }
+    } else if (block <= 10) {
+        // EFUSE_RD_RS_ERR0_REG: (hi) BLOCK8, BLOCK7, BLOCK6, BLOCK5, BLOCK4, BLOCK3, BLOCK2, BLOCK1 (low)
+        // EFUSE_RD_RS_ERR1_REG:                                                     BLOCK10, BLOCK9
+        block--;
+        uint32_t error_reg = REG_READ(EFUSE_RD_RS_ERR0_REG + (block / 8) * 4);
+        return ESP_EFUSE_BLOCK_ERROR_BITS(error_reg, block % 8) != 0;
+    }
+    return false;
+}

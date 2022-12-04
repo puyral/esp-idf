@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: 2015-2021 Espressif Systems (Shanghai) CO LTD
+ * SPDX-FileCopyrightText: 2015-2022 Espressif Systems (Shanghai) CO LTD
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -72,7 +72,8 @@ typedef union {
         uint32_t mac_bb_pd               :  1; // whether hardware(MAC, BB) force-power-down is required during sleep
         uint32_t wakeup_timer_required   :  1; // whether system timer is needed
         uint32_t no_light_sleep          :  1; // do not allow system to enter light sleep after bluetooth is enabled
-        uint32_t reserved                : 26; // reserved
+        uint32_t main_xtal_pu            :  1; // power up main XTAL
+        uint32_t reserved                : 25; // reserved
     };
     uint32_t val;
 } btdm_lpcntl_t;
@@ -132,43 +133,48 @@ typedef struct {
     intptr_t end;
 } btdm_dram_available_region_t;
 
+typedef struct {
+    void *handle;
+    void *storage;
+} btdm_queue_item_t;
+
 typedef void (* osi_intr_handler)(void);
 
 /* OSI function */
 struct osi_funcs_t {
     uint32_t _magic;
     uint32_t _version;
-    void (*_interrupt_set)(int32_t cpu_no, int32_t intr_source, int32_t interrupt_no, int32_t interrpt_prio);
-    void (*_interrupt_clear)(int32_t interrupt_source, int32_t interrupt_no);
-    void (*_interrupt_handler_set)(int32_t interrupt_no, void *fn, void *arg);
+    void (*_interrupt_set)(int cpu_no, int intr_source, int interrupt_no, int interrpt_prio);
+    void (*_interrupt_clear)(int interrupt_source, int interrupt_no);
+    void (*_interrupt_handler_set)(int interrupt_no, void *fn, void *arg);
     void (*_interrupt_disable)(void);
     void (*_interrupt_restore)(void);
     void (*_task_yield)(void);
     void (*_task_yield_from_isr)(void);
     void *(*_semphr_create)(uint32_t max, uint32_t init);
     void (*_semphr_delete)(void *semphr);
-    int32_t (*_semphr_take_from_isr)(void *semphr, void *hptw);
-    int32_t (*_semphr_give_from_isr)(void *semphr, void *hptw);
-    int32_t (*_semphr_take)(void *semphr, uint32_t block_time_ms);
-    int32_t (*_semphr_give)(void *semphr);
+    int (*_semphr_take_from_isr)(void *semphr, void *hptw);
+    int (*_semphr_give_from_isr)(void *semphr, void *hptw);
+    int (*_semphr_take)(void *semphr, uint32_t block_time_ms);
+    int (*_semphr_give)(void *semphr);
     void *(*_mutex_create)(void);
     void (*_mutex_delete)(void *mutex);
-    int32_t (*_mutex_lock)(void *mutex);
-    int32_t (*_mutex_unlock)(void *mutex);
+    int (*_mutex_lock)(void *mutex);
+    int (*_mutex_unlock)(void *mutex);
     void *(* _queue_create)(uint32_t queue_len, uint32_t item_size);
     void (* _queue_delete)(void *queue);
-    int32_t (* _queue_send)(void *queue, void *item, uint32_t block_time_ms);
-    int32_t (* _queue_send_from_isr)(void *queue, void *item, void *hptw);
-    int32_t (* _queue_recv)(void *queue, void *item, uint32_t block_time_ms);
-    int32_t (* _queue_recv_from_isr)(void *queue, void *item, void *hptw);
-    int32_t (* _task_create)(void *task_func, const char *name, uint32_t stack_depth, void *param, uint32_t prio, void *task_handle, uint32_t core_id);
+    int (* _queue_send)(void *queue, void *item, uint32_t block_time_ms);
+    int (* _queue_send_from_isr)(void *queue, void *item, void *hptw);
+    int (* _queue_recv)(void *queue, void *item, uint32_t block_time_ms);
+    int (* _queue_recv_from_isr)(void *queue, void *item, void *hptw);
+    int (* _task_create)(void *task_func, const char *name, uint32_t stack_depth, void *param, uint32_t prio, void *task_handle, uint32_t core_id);
     void (* _task_delete)(void *task_handle);
     bool (* _is_in_isr)(void);
     int (* _cause_sw_intr_to_core)(int core_id, int intr_no);
     void *(* _malloc)(size_t size);
     void *(* _malloc_internal)(size_t size);
     void (* _free)(void *p);
-    int32_t (* _read_efuse_mac)(uint8_t mac[6]);
+    int (* _read_efuse_mac)(uint8_t mac[6]);
     void (* _srand)(unsigned int seed);
     int (* _rand)(void);
     uint32_t (* _btdm_lpcycles_2_hus)(uint32_t cycles, uint32_t *error_corr);
@@ -234,11 +240,13 @@ extern int ble_txpwr_get(int power_type);
 
 extern uint16_t l2c_ble_link_get_tx_buf_num(void);
 extern int coex_core_ble_conn_dyn_prio_get(bool *low, bool *high);
+extern void coex_pti_v2(void);
 
 extern bool btdm_deep_sleep_mem_init(void);
 extern void btdm_deep_sleep_mem_deinit(void);
 extern void btdm_ble_power_down_dma_copy(bool copy);
 extern uint8_t btdm_sleep_clock_sync(void);
+extern void sdk_config_extend_set_pll_track(bool enable);
 
 #if CONFIG_MAC_BB_PD
 extern void esp_mac_bb_power_down(void);
@@ -268,38 +276,38 @@ extern char _bt_tmp_bss_end;
 /* Local Function Declare
  *********************************************************************
  */
-static void interrupt_set_wrapper(int32_t cpu_no, int32_t intr_source, int32_t intr_num, int32_t intr_prio);
-static void interrupt_clear_wrapper(int32_t intr_source, int32_t intr_num);
+static void interrupt_set_wrapper(int cpu_no, int intr_source, int intr_num, int intr_prio);
+static void interrupt_clear_wrapper(int intr_source, int intr_num);
 static void interrupt_handler_set_wrapper(int n, void *fn, void *arg);
-static void IRAM_ATTR interrupt_disable(void);
-static void IRAM_ATTR interrupt_restore(void);
-static void IRAM_ATTR task_yield_from_isr(void);
+static void interrupt_disable(void);
+static void interrupt_restore(void);
+static void task_yield_from_isr(void);
 static void *semphr_create_wrapper(uint32_t max, uint32_t init);
 static void semphr_delete_wrapper(void *semphr);
-static int32_t IRAM_ATTR semphr_take_from_isr_wrapper(void *semphr, void *hptw);
-static int32_t IRAM_ATTR semphr_give_from_isr_wrapper(void *semphr, void *hptw);
-static int32_t  semphr_take_wrapper(void *semphr, uint32_t block_time_ms);
-static int32_t  semphr_give_wrapper(void *semphr);
+static int semphr_take_from_isr_wrapper(void *semphr, void *hptw);
+static int semphr_give_from_isr_wrapper(void *semphr, void *hptw);
+static int  semphr_take_wrapper(void *semphr, uint32_t block_time_ms);
+static int  semphr_give_wrapper(void *semphr);
 static void *mutex_create_wrapper(void);
 static void mutex_delete_wrapper(void *mutex);
-static int32_t mutex_lock_wrapper(void *mutex);
-static int32_t mutex_unlock_wrapper(void *mutex);
+static int mutex_lock_wrapper(void *mutex);
+static int mutex_unlock_wrapper(void *mutex);
 static void *queue_create_wrapper(uint32_t queue_len, uint32_t item_size);
 static void queue_delete_wrapper(void *queue);
-static int32_t queue_send_wrapper(void *queue, void *item, uint32_t block_time_ms);
-static int32_t IRAM_ATTR queue_send_from_isr_wrapper(void *queue, void *item, void *hptw);
-static int32_t queue_recv_wrapper(void *queue, void *item, uint32_t block_time_ms);
-static int32_t IRAM_ATTR queue_recv_from_isr_wrapper(void *queue, void *item, void *hptw);
-static int32_t task_create_wrapper(void *task_func, const char *name, uint32_t stack_depth, void *param, uint32_t prio, void *task_handle, uint32_t core_id);
+static int queue_send_wrapper(void *queue, void *item, uint32_t block_time_ms);
+static int queue_send_from_isr_wrapper(void *queue, void *item, void *hptw);
+static int queue_recv_wrapper(void *queue, void *item, uint32_t block_time_ms);
+static int queue_recv_from_isr_wrapper(void *queue, void *item, void *hptw);
+static int task_create_wrapper(void *task_func, const char *name, uint32_t stack_depth, void *param, uint32_t prio, void *task_handle, uint32_t core_id);
 static void task_delete_wrapper(void *task_handle);
-static bool IRAM_ATTR is_in_isr_wrapper(void);
+static bool is_in_isr_wrapper(void);
 static void *malloc_internal_wrapper(size_t size);
-static int32_t IRAM_ATTR read_mac_wrapper(uint8_t mac[6]);
-static void IRAM_ATTR srand_wrapper(unsigned int seed);
-static int IRAM_ATTR rand_wrapper(void);
-static uint32_t IRAM_ATTR btdm_lpcycles_2_hus(uint32_t cycles, uint32_t *error_corr);
-static uint32_t IRAM_ATTR btdm_hus_2_lpcycles(uint32_t hus);
-static bool IRAM_ATTR btdm_sleep_check_duration(int32_t *slot_cnt);
+static int read_mac_wrapper(uint8_t mac[6]);
+static void srand_wrapper(unsigned int seed);
+static int rand_wrapper(void);
+static uint32_t btdm_lpcycles_2_hus(uint32_t cycles, uint32_t *error_corr);
+static uint32_t btdm_hus_2_lpcycles(uint32_t hus);
+static bool btdm_sleep_check_duration(int32_t *slot_cnt);
 static void btdm_sleep_enter_phase1_wrapper(uint32_t lpcycles);
 static void btdm_sleep_enter_phase2_wrapper(void);
 static void btdm_sleep_exit_phase3_wrapper(void);
@@ -431,16 +439,16 @@ static inline void esp_bt_power_domain_off(void)
     esp_wifi_bt_power_domain_off();
 }
 
-static void interrupt_set_wrapper(int32_t cpu_no, int32_t intr_source, int32_t intr_num, int32_t intr_prio)
+static void interrupt_set_wrapper(int cpu_no, int intr_source, int intr_num, int intr_prio)
 {
     esp_rom_route_intr_matrix(cpu_no, intr_source, intr_num);
 }
 
-static void interrupt_clear_wrapper(int32_t intr_source, int32_t intr_num)
+static void interrupt_clear_wrapper(int intr_source, int intr_num)
 {
 }
 
-static void interrupt_handler_set_wrapper(int32_t n, void *fn, void *arg)
+static void interrupt_handler_set_wrapper(int n, void *fn, void *arg)
 {
     xt_set_interrupt_handler(n, (xt_handler)fn, arg);
 }
@@ -480,36 +488,64 @@ static void IRAM_ATTR task_yield_from_isr(void)
 
 static void *semphr_create_wrapper(uint32_t max, uint32_t init)
 {
-    return (void *)xSemaphoreCreateCounting(max, init);
+    btdm_queue_item_t *semphr = heap_caps_calloc(1, sizeof(btdm_queue_item_t), MALLOC_CAP_8BIT|MALLOC_CAP_INTERNAL);
+    assert(semphr);
+
+#if !CONFIG_SPIRAM_USE_MALLOC
+    semphr->handle = (void *)xSemaphoreCreateCounting(max, init);
+#else
+
+    semphr->storage = heap_caps_malloc(sizeof(StaticQueue_t), MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT);
+    assert(semphr->storage);
+
+    semphr->handle = (void *)xSemaphoreCreateCountingStatic(max, init, semphr->storage);
+#endif
+    assert(semphr->handle);
+    return semphr;
 }
 
 static void semphr_delete_wrapper(void *semphr)
 {
-    vSemaphoreDelete(semphr);
+    if (semphr == NULL) {
+        return;
+    }
+
+    btdm_queue_item_t *semphr_item = (btdm_queue_item_t *)semphr;
+
+    if (semphr_item->handle) {
+        vSemaphoreDelete(semphr_item->handle);
+    }
+#ifdef CONFIG_SPIRAM_USE_MALLOC
+    if (semphr_item->storage) {
+        free(semphr_item->storage);
+    }
+#endif
+
+    free(semphr);
 }
 
 static int IRAM_ATTR semphr_take_from_isr_wrapper(void *semphr, void *hptw)
 {
-    return (int)xSemaphoreTakeFromISR(semphr, hptw);
+    return (int)xSemaphoreTakeFromISR(((btdm_queue_item_t *)semphr)->handle, hptw);
 }
 
 static int IRAM_ATTR semphr_give_from_isr_wrapper(void *semphr, void *hptw)
 {
-    return (int)xSemaphoreGiveFromISR(semphr, hptw);
+    return (int)xSemaphoreGiveFromISR(((btdm_queue_item_t *)semphr)->handle, hptw);
 }
 
 static int semphr_take_wrapper(void *semphr, uint32_t block_time_ms)
 {
     if (block_time_ms == OSI_FUNCS_TIME_BLOCKING) {
-        return (int)xSemaphoreTake(semphr, portMAX_DELAY);
+        return (int)xSemaphoreTake(((btdm_queue_item_t *)semphr)->handle, portMAX_DELAY);
     } else {
-        return (int)xSemaphoreTake(semphr, block_time_ms / portTICK_PERIOD_MS);
+        return (int)xSemaphoreTake(((btdm_queue_item_t *)semphr)->handle, block_time_ms / portTICK_PERIOD_MS);
     }
 }
 
 static int semphr_give_wrapper(void *semphr)
 {
-    return (int)xSemaphoreGive(semphr);
+    return (int)xSemaphoreGive(((btdm_queue_item_t *)semphr)->handle);
 }
 
 static void *mutex_create_wrapper(void)
@@ -534,40 +570,71 @@ static int mutex_unlock_wrapper(void *mutex)
 
 static void *queue_create_wrapper(uint32_t queue_len, uint32_t item_size)
 {
-    return (void *)xQueueCreate(queue_len, item_size);
+    btdm_queue_item_t *queue = NULL;
+
+    queue = (btdm_queue_item_t*)heap_caps_malloc(sizeof(btdm_queue_item_t), MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT);
+    assert(queue);
+
+#if CONFIG_SPIRAM_USE_MALLOC
+
+    queue->storage = heap_caps_calloc(1, sizeof(StaticQueue_t) + (queue_len*item_size), MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT);
+    assert(queue->storage);
+
+    queue->handle = xQueueCreateStatic( queue_len, item_size, ((uint8_t*)(queue->storage)) + sizeof(StaticQueue_t), (StaticQueue_t*)(queue->storage));
+    assert(queue->handle);
+
+#else
+    queue->handle = xQueueCreate( queue_len, item_size);
+    assert(queue->handle);
+#endif
+
+    return queue;
 }
 
 static void queue_delete_wrapper(void *queue)
 {
-    vQueueDelete(queue);
+    btdm_queue_item_t *queue_item = (btdm_queue_item_t *)queue;
+    if (queue_item) {
+        if(queue_item->handle){
+            vQueueDelete(queue_item->handle);
+        }
+
+#if CONFIG_SPIRAM_USE_MALLOC
+        if (queue_item->storage) {
+            free(queue_item->storage);
+        }
+#endif
+
+        free(queue_item);
+    }
 }
 
 static int queue_send_wrapper(void *queue, void *item, uint32_t block_time_ms)
 {
     if (block_time_ms == OSI_FUNCS_TIME_BLOCKING) {
-        return (int)xQueueSend(queue, item, portMAX_DELAY);
+        return (int)xQueueSend(((btdm_queue_item_t*)queue)->handle, item, portMAX_DELAY);
     } else {
-        return (int)xQueueSend(queue, item, block_time_ms / portTICK_PERIOD_MS);
+        return (int)xQueueSend(((btdm_queue_item_t*)queue)->handle, item, block_time_ms / portTICK_PERIOD_MS);
     }
 }
 
 static int IRAM_ATTR queue_send_from_isr_wrapper(void *queue, void *item, void *hptw)
 {
-    return (int)xQueueSendFromISR(queue, item, hptw);
+    return (int)xQueueSendFromISR(((btdm_queue_item_t*)queue)->handle, item, hptw);
 }
 
 static int queue_recv_wrapper(void *queue, void *item, uint32_t block_time_ms)
 {
     if (block_time_ms == OSI_FUNCS_TIME_BLOCKING) {
-        return (int)xQueueReceive(queue, item, portMAX_DELAY);
+        return (int)xQueueReceive(((btdm_queue_item_t*)queue)->handle, item, portMAX_DELAY);
     } else {
-        return (int)xQueueReceive(queue, item, block_time_ms / portTICK_PERIOD_MS);
+        return (int)xQueueReceive(((btdm_queue_item_t*)queue)->handle, item, block_time_ms / portTICK_PERIOD_MS);
     }
 }
 
 static int IRAM_ATTR queue_recv_from_isr_wrapper(void *queue, void *item, void *hptw)
 {
-    return (int)xQueueReceiveFromISR(queue, item, hptw);
+    return (int)xQueueReceiveFromISR(((btdm_queue_item_t*)queue)->handle, item, hptw);
 }
 
 static int task_create_wrapper(void *task_func, const char *name, uint32_t stack_depth, void *param, uint32_t prio, void *task_handle, uint32_t core_id)
@@ -872,25 +939,21 @@ esp_err_t esp_bt_mem_release(esp_bt_mode_t mode)
     return ESP_OK;
 }
 
-#if CONFIG_FREERTOS_USE_TICKLESS_IDLE
+#if CONFIG_MAC_BB_PD
 static void IRAM_ATTR btdm_mac_bb_power_down_cb(void)
 {
     if (s_lp_cntl.mac_bb_pd && s_lp_stat.mac_bb_pd == 0) {
-#if (CONFIG_MAC_BB_PD)
         btdm_ble_power_down_dma_copy(true);
-#endif
         s_lp_stat.mac_bb_pd = 1;
     }
 }
 
 static void IRAM_ATTR btdm_mac_bb_power_up_cb(void)
 {
-#if (CONFIG_MAC_BB_PD)
     if (s_lp_cntl.mac_bb_pd && s_lp_stat.mac_bb_pd) {
         btdm_ble_power_down_dma_copy(false);
         s_lp_stat.mac_bb_pd = 0;
     }
-#endif
 }
 #endif
 
@@ -934,9 +997,12 @@ esp_err_t esp_bt_controller_init(esp_bt_controller_config_t *cfg)
     // overwrite some parameters
     cfg->magic = ESP_BT_CTRL_CONFIG_MAGIC_VAL;
 
+    sdk_config_extend_set_pll_track(false);
+
 #if CONFIG_MAC_BB_PD
     esp_mac_bb_pd_mem_init();
 #endif
+    esp_phy_pd_mem_init();
     esp_bt_power_domain_on();
 
     btdm_controller_mem_init();
@@ -970,15 +1036,16 @@ esp_err_t esp_bt_controller_init(esp_bt_controller_config_t *cfg)
         // set default values for global states or resources
         s_lp_stat.val = 0;
         s_lp_cntl.val = 0;
+        s_lp_cntl.main_xtal_pu = 0;
         s_wakeup_req_sem = NULL;
         s_btdm_slp_tmr = NULL;
 
         // configure and initialize resources
         s_lp_cntl.enable = (cfg->sleep_mode == ESP_BT_SLEEP_MODE_1) ? 1 : 0;
-        s_lp_cntl.no_light_sleep = 1;
+        s_lp_cntl.no_light_sleep = 0;
 
         if (s_lp_cntl.enable) {
-#if (CONFIG_MAC_BB_PD)
+#if CONFIG_MAC_BB_PD
             if (!btdm_deep_sleep_mem_init()) {
                 err = ESP_ERR_NO_MEM;
                 goto error;
@@ -1016,35 +1083,43 @@ esp_err_t esp_bt_controller_init(esp_bt_controller_config_t *cfg)
         s_lp_cntl.lpclk_sel = BTDM_LPCLK_SEL_XTAL; // set default value
 #if CONFIG_BT_CTRL_LPCLK_SEL_EXT_32K_XTAL
         // check whether or not EXT_CRYS is working
-        if (rtc_clk_slow_freq_get() == RTC_SLOW_FREQ_32K_XTAL) {
+        if (rtc_clk_slow_src_get() == SOC_RTC_SLOW_CLK_SRC_XTAL32K) {
             s_lp_cntl.lpclk_sel = BTDM_LPCLK_SEL_XTAL32K; // External 32 kHz XTAL
-            s_lp_cntl.no_light_sleep = 0;
         } else {
-            ESP_LOGW(BT_LOG_TAG, "32.768kHz XTAL not detected, fall back to main XTAL as Bluetooth sleep clock\n"
-                 "light sleep mode will not be able to apply when bluetooth is enabled");
+            ESP_LOGW(BT_LOG_TAG, "32.768kHz XTAL not detected, fall back to main XTAL as Bluetooth sleep clock");
+#if !CONFIG_BT_CTRL_MAIN_XTAL_PU_DURING_LIGHT_SLEEP
+            s_lp_cntl.no_light_sleep = 1;
+#endif
         }
+#elif (CONFIG_BT_CTRL_LPCLK_SEL_MAIN_XTAL)
+        ESP_LOGI(BT_LOG_TAG, "Bluetooth will use main XTAL as Bluetooth sleep clock.");
+#if !CONFIG_BT_CTRL_MAIN_XTAL_PU_DURING_LIGHT_SLEEP
+            s_lp_cntl.no_light_sleep = 1;
+#endif
 #elif (CONFIG_BT_CTRL_LPCLK_SEL_RTC_SLOW)
-        // check whether or not EXT_CRYS is working
-        if (rtc_clk_slow_freq_get() == RTC_SLOW_FREQ_RTC) {
+        // check whether or not internal 150 kHz RC oscillator is working
+        if (rtc_clk_slow_src_get() == SOC_RTC_SLOW_CLK_SRC_RC_SLOW) {
             s_lp_cntl.lpclk_sel = BTDM_LPCLK_SEL_RTC_SLOW; // Internal 150 kHz RC oscillator
-            ESP_LOGW(BTDM_LOG_TAG, "Internal 150kHz RC osciallator. The accuracy of this clock is a lot larger than 500ppm which is "
+            ESP_LOGW(BT_LOG_TAG, "Internal 150kHz RC osciallator. The accuracy of this clock is a lot larger than 500ppm which is "
                  "required in Bluetooth communication, so don't select this option in scenarios such as BLE connection state.");
         } else {
             ESP_LOGW(BT_LOG_TAG, "Internal 150kHz RC oscillator not detected.");
             assert(0);
         }
-#else
-        s_lp_cntl.no_light_sleep = 1;
 #endif
 
         bool select_src_ret __attribute__((unused));
         bool set_div_ret __attribute__((unused));
         if (s_lp_cntl.lpclk_sel == BTDM_LPCLK_SEL_XTAL) {
+#ifdef CONFIG_BT_CTRL_MAIN_XTAL_PU_DURING_LIGHT_SLEEP
+            ESP_ERROR_CHECK(esp_sleep_pd_config(ESP_PD_DOMAIN_XTAL, ESP_PD_OPTION_ON));
+            s_lp_cntl.main_xtal_pu = 1;
+#endif
             select_src_ret = btdm_lpclk_select_src(BTDM_LPCLK_SEL_XTAL);
-            set_div_ret = btdm_lpclk_set_div(rtc_clk_xtal_freq_get() * 2);
+            set_div_ret = btdm_lpclk_set_div(esp_clk_xtal_freq() / MHZ);
             assert(select_src_ret && set_div_ret);
             btdm_lpcycle_us_frac = RTC_CLK_CAL_FRACT;
-            btdm_lpcycle_us = 2 << (btdm_lpcycle_us_frac);
+            btdm_lpcycle_us = 1 << (btdm_lpcycle_us_frac);
         } else if (s_lp_cntl.lpclk_sel == BTDM_LPCLK_SEL_XTAL32K) {
             select_src_ret = btdm_lpclk_select_src(BTDM_LPCLK_SEL_XTAL32K);
             set_div_ret = btdm_lpclk_set_div(0);
@@ -1063,6 +1138,9 @@ esp_err_t esp_bt_controller_init(esp_bt_controller_config_t *cfg)
             err = ESP_ERR_INVALID_ARG;
             goto error;
         }
+#if CONFIG_SW_COEXIST_ENABLE
+        coex_update_lpclk_interval();
+#endif
 
 #ifdef CONFIG_PM_ENABLE
         if (s_lp_cntl.no_light_sleep) {
@@ -1070,6 +1148,7 @@ esp_err_t esp_bt_controller_init(esp_bt_controller_config_t *cfg)
                 err = ESP_ERR_NO_MEM;
                 goto error;
             }
+            ESP_LOGW(BT_LOG_TAG, "light sleep mode will not be able to apply when bluetooth is enabled.");
         }
         if ((err = esp_pm_lock_create(ESP_PM_APB_FREQ_MAX, 0, "bt", &s_pm_lock)) != ESP_OK) {
             err = ESP_ERR_NO_MEM;
@@ -1085,6 +1164,7 @@ esp_err_t esp_bt_controller_init(esp_bt_controller_config_t *cfg)
 #endif
 
     periph_module_enable(PERIPH_BT_MODULE);
+    periph_module_reset(PERIPH_BT_MODULE);
 
     esp_phy_enable();
     s_lp_stat.phy_enabled = 1;
@@ -1093,6 +1173,7 @@ esp_err_t esp_bt_controller_init(esp_bt_controller_config_t *cfg)
         err = ESP_ERR_NO_MEM;
         goto error;
     }
+    coex_pti_v2();
 
     btdm_controller_status = ESP_BT_CONTROLLER_STATUS_INITED;
 
@@ -1125,7 +1206,7 @@ error:
             s_btdm_slp_tmr = NULL;
         }
 
-#if (CONFIG_MAC_BB_PD)
+#if CONFIG_MAC_BB_PD
         if (s_lp_cntl.mac_bb_pd) {
             btdm_deep_sleep_mem_deinit();
             s_lp_cntl.mac_bb_pd = 0;
@@ -1138,6 +1219,22 @@ error:
                 s_wakeup_req_sem = NULL;
             }
         }
+
+        if (s_lp_cntl.lpclk_sel == BTDM_LPCLK_SEL_XTAL) {
+#ifdef CONFIG_BT_CTRL_MAIN_XTAL_PU_DURING_LIGHT_SLEEP
+            if (s_lp_cntl.main_xtal_pu) {
+                ESP_ERROR_CHECK(esp_sleep_pd_config(ESP_PD_DOMAIN_XTAL, ESP_PD_OPTION_OFF));
+                s_lp_cntl.main_xtal_pu = 0;
+            }
+#endif
+            btdm_lpclk_select_src(BTDM_LPCLK_SEL_RTC_SLOW);
+            btdm_lpclk_set_div(0);
+#if CONFIG_SW_COEXIST_ENABLE
+            coex_update_lpclk_interval();
+#endif
+        }
+
+        btdm_lpcycle_us = 0;
     } while (0);
 
 #if CONFIG_MAC_BB_PD
@@ -1171,7 +1268,7 @@ esp_err_t esp_bt_controller_deinit(void)
 
     // deinit low power control resources
     do {
-#if (CONFIG_MAC_BB_PD)
+#if CONFIG_MAC_BB_PD
         btdm_deep_sleep_mem_deinit();
 #endif
 
@@ -1200,6 +1297,22 @@ esp_err_t esp_bt_controller_deinit(void)
             semphr_delete_wrapper(s_wakeup_req_sem);
             s_wakeup_req_sem = NULL;
         }
+
+        if (s_lp_cntl.lpclk_sel == BTDM_LPCLK_SEL_XTAL) {
+#ifdef CONFIG_BT_CTRL_MAIN_XTAL_PU_DURING_LIGHT_SLEEP
+            if (s_lp_cntl.main_xtal_pu) {
+                ESP_ERROR_CHECK(esp_sleep_pd_config(ESP_PD_DOMAIN_XTAL, ESP_PD_OPTION_OFF));
+                s_lp_cntl.main_xtal_pu = 0;
+            }
+#endif
+            btdm_lpclk_select_src(BTDM_LPCLK_SEL_RTC_SLOW);
+            btdm_lpclk_set_div(0);
+#if CONFIG_SW_COEXIST_ENABLE
+            coex_update_lpclk_interval();
+#endif
+        }
+
+        btdm_lpcycle_us = 0;
     } while (0);
 
 #if CONFIG_MAC_BB_PD
@@ -1208,12 +1321,15 @@ esp_err_t esp_bt_controller_deinit(void)
 #endif
 
     esp_bt_power_domain_off();
+#if CONFIG_MAC_BB_PD
+    esp_mac_bb_pd_mem_deinit();
+#endif
+    esp_phy_pd_mem_deinit();
 
     free(osi_funcs_p);
     osi_funcs_p = NULL;
 
     btdm_controller_status = ESP_BT_CONTROLLER_STATUS_IDLE;
-    btdm_lpcycle_us = 0;
     return ESP_OK;
 }
 

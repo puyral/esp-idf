@@ -15,6 +15,8 @@
 extern "C" {
 #endif
 
+#define ESP_EFUSE_BLOCK_ERROR_BITS(error_reg, block) ((error_reg) & (0x0F << (4 * (block))))
+
 // Always inline these functions even no gcc optimization is applied.
 
 /******************* eFuse fields *************************/
@@ -96,14 +98,27 @@ __attribute__((always_inline)) static inline uint32_t efuse_ll_get_chip_ver_pkg(
     return (pkg_version_4bit << 3) | pkg_version;
 }
 
+// use efuse_hal_get_major_chip_version() to get full major chip version
 __attribute__((always_inline)) static inline bool efuse_ll_get_chip_ver_rev1(void)
 {
     return REG_GET_BIT(EFUSE_BLK0_RDATA3_REG, EFUSE_RD_CHIP_VER_REV1);
 }
 
+// use efuse_hal_get_major_chip_version() to get full major chip version
 __attribute__((always_inline)) static inline bool efuse_ll_get_chip_ver_rev2(void)
 {
     return REG_GET_BIT(EFUSE_BLK0_RDATA5_REG, EFUSE_RD_CHIP_VER_REV2);
+}
+
+// use efuse_hal_get_minor_chip_version() to get minor chip version
+__attribute__((always_inline)) static inline uint32_t efuse_ll_get_chip_wafer_version_minor(void)
+{
+    return REG_GET_FIELD(EFUSE_BLK0_RDATA5_REG, EFUSE_RD_WAFER_VERSION_MINOR);
+}
+
+__attribute__((always_inline)) static inline bool efuse_ll_get_disable_wafer_version_major(void)
+{
+    return false;
 }
 
 __attribute__((always_inline)) static inline uint32_t efuse_ll_get_coding_scheme(void)
@@ -149,6 +164,15 @@ __attribute__((always_inline)) static inline uint32_t efuse_ll_get_adc1_tp_high(
 __attribute__((always_inline)) static inline uint32_t efuse_ll_get_adc2_tp_high(void)
 {
     return REG_GET_FIELD(EFUSE_BLK3_RDATA3_REG, EFUSE_RD_ADC2_TP_HIGH);
+}
+
+__attribute__((always_inline)) static inline bool efuse_ll_get_dec_warnings(unsigned block)
+{
+    if (block == 0 || block > 4) {
+        return false;
+    }
+    uint32_t error_reg = REG_GET_FIELD(EFUSE_DEC_STATUS_REG, EFUSE_DEC_WARNINGS);
+    return ESP_EFUSE_BLOCK_ERROR_BITS(error_reg, block - 1) != 0;
 }
 
 /******************* eFuse control functions *************************/

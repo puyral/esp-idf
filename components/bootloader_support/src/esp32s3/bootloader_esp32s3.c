@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: 2020-2021 Espressif Systems (Shanghai) CO LTD
+ * SPDX-FileCopyrightText: 2020-2022 Espressif Systems (Shanghai) CO LTD
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -37,6 +37,8 @@
 #include "esp_efuse.h"
 #include "hal/mmu_hal.h"
 #include "hal/cache_hal.h"
+#include "xtensa/config/core.h"
+#include "xt_instr_macros.h"
 
 
 static const char *TAG = "boot.esp32s3";
@@ -123,16 +125,16 @@ static void print_flash_info(const esp_image_header_t *bootloader_hdr)
 
     const char *str;
     switch (bootloader_hdr->spi_speed) {
-    case ESP_IMAGE_SPI_SPEED_40M:
+    case ESP_IMAGE_SPI_SPEED_DIV_2:
         str = "40MHz";
         break;
-    case ESP_IMAGE_SPI_SPEED_26M:
+    case ESP_IMAGE_SPI_SPEED_DIV_3:
         str = "26.7MHz";
         break;
-    case ESP_IMAGE_SPI_SPEED_20M:
+    case ESP_IMAGE_SPI_SPEED_DIV_4:
         str = "20MHz";
         break;
-    case ESP_IMAGE_SPI_SPEED_80M:
+    case ESP_IMAGE_SPI_SPEED_DIV_1:
         str = "80MHz";
         break;
     default:
@@ -206,6 +208,11 @@ static esp_err_t bootloader_init_spi_flash(void)
         ESP_LOGE(TAG, "SPI flash pins are overridden. Enable CONFIG_SPI_FLASH_ROM_DRIVER_PATCH in menuconfig");
         return ESP_FAIL;
     }
+#endif
+
+#if CONFIG_SPI_FLASH_HPM_ENABLE
+    // Reset flash, clear volatile bits DC[0:1]. Make it work under default mode to boot.
+    bootloader_spi_flash_reset();
 #endif
 
     bootloader_flash_unlock();
@@ -316,6 +323,12 @@ static inline void bootloader_ana_reset_config(void)
 esp_err_t bootloader_init(void)
 {
     esp_err_t ret = ESP_OK;
+
+#if XCHAL_ERRATUM_572
+    uint32_t memctl = XCHAL_CACHE_MEMCTL_DEFAULT;
+    WSR(MEMCTL, memctl);
+#endif // XCHAL_ERRATUM_572
+
     bootloader_ana_reset_config();
     bootloader_super_wdt_auto_feed();
     // protect memory region

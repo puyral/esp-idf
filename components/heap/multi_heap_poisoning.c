@@ -1,16 +1,8 @@
-// Copyright 2015-2016 Espressif Systems (Shanghai) PTE LTD
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+/*
+ * SPDX-FileCopyrightText: 2015-2022 Espressif Systems (Shanghai) CO LTD
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
 #include <stdint.h>
 #include <stdlib.h>
 #include <stdbool.h>
@@ -28,6 +20,17 @@
 
 /* Defines compile-time configuration macros */
 #include "multi_heap_config.h"
+
+#if !CONFIG_HEAP_TLSF_USE_ROM_IMPL
+#include "tlsf.h"
+#else
+/* Header containing the declaration of tlsf_poison_fill_pfunc_set()
+ * and tlsf_poison_check_pfunc_set() used to register callbacks to
+ * fill and check memory region with given patterns in the heap
+ * components.
+ */
+#include "rom/tlsf.h"
+#endif
 
 #ifdef MULTI_HEAP_POISONING
 
@@ -182,6 +185,22 @@ static bool verify_fill_pattern(void *data, size_t size, bool print_errors, bool
         }
     }
     return valid;
+}
+
+/*!
+ * @brief Definition of the weak function declared in TLSF repository.
+ * The call of this function assures that the header of an absorbed
+ * block is filled with the correct pattern in case of comprehensive
+ * heap poisoning.
+ *
+ * @param start: pointer to the start of the memory region to fill
+ * @param size: size of the memory region to fill
+ * @param is_free: Indicate if the pattern to use the fill the region should be
+ * an after free or after allocation pattern.
+ */
+void block_absorb_post_hook(void *start, size_t size, bool is_free)
+{
+    multi_heap_internal_poison_fill_region(start, size, is_free);
 }
 #endif
 
@@ -340,6 +359,10 @@ multi_heap_handle_t multi_heap_register(void *start, size_t size)
         memset(start, FREE_FILL_PATTERN, size);
     }
 #endif
+#if CONFIG_HEAP_TLSF_USE_ROM_IMPL
+    tlsf_poison_fill_pfunc_set(multi_heap_internal_poison_fill_region);
+    tlsf_poison_check_pfunc_set(multi_heap_internal_check_block_poisoning);
+#endif // CONFIG_HEAP_TLSF_USE_ROM_IMPL
     return multi_heap_register_impl(start, size);
 }
 

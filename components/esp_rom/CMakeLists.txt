@@ -11,19 +11,30 @@ if(target STREQUAL "linux")
                         "${target}/esp_rom_crc.c"
                         "${target}/esp_rom_md5.c"
                         "${target}/esp_rom_efuse.c")
+    list(APPEND include_dirs "${IDF_PATH}/tools/mocks/soc/include")
 else()
     list(APPEND include_dirs "${target}")
     list(APPEND sources "patches/esp_rom_crc.c"
                         "patches/esp_rom_sys.c"
                         "patches/esp_rom_uart.c"
                         "patches/esp_rom_spiflash.c"
-                        "patches/esp_rom_tjpgd.c"
-                        "patches/esp_rom_regi2c.c")
+                        "patches/esp_rom_regi2c.c"
+                        "patches/esp_rom_efuse.c")
+
+    if(CONFIG_HEAP_TLSF_USE_ROM_IMPL AND CONFIG_ESP_ROM_TLSF_CHECK_PATCH)
+        # This file shall be included in the build if TLSF in ROM is activated
+        list(APPEND sources "patches/esp_rom_tlsf.c")
+    endif()
+
     list(APPEND private_required_comp soc hal)
 endif()
 
 if(CONFIG_IDF_TARGET_ARCH_XTENSA)
     list(APPEND sources "patches/esp_rom_longjmp.S")
+endif()
+
+if(CONFIG_SOC_SYSTIMER_SUPPORTED)
+    list(APPEND sources "patches/esp_rom_systimer.c")
 endif()
 
 idf_component_register(SRCS ${sources}
@@ -58,7 +69,11 @@ if(target STREQUAL "linux")
 else()
     target_linker_script(${COMPONENT_LIB} INTERFACE "${target}/${ld_folder}/${target}.rom.ld")
     rom_linker_script("api")
-    rom_linker_script("libgcc")
+    if(CONFIG_COMPILER_FLOAT_LIB_FROM_GCCLIB)
+        rom_linker_script("libgcc")
+    else()
+        rom_linker_script("rvfp")
+    endif()
 endif()
 
 idf_build_get_property(time_t_size TIME_T_SIZE)
@@ -171,7 +186,7 @@ else() # Regular app build
             endif()
         endif()
 
-        if(CONFIG_ESP32C3_REV_MIN_3)
+        if(CONFIG_ESP32C3_REV_MIN_3 OR CONFIG_ESP32C3_REV_MIN_4)
             rom_linker_script("eco3")
         endif()
 
@@ -190,10 +205,28 @@ else() # Regular app build
         rom_linker_script("version")
         rom_linker_script("mbedtls")
 
-        if(CONFIG_NEWLIB_NANO_FORMAT AND time_t_size EQUAL 4)
-            # nano formatting functions in ROM are built for 32-bit time_t,
-            # only link them if the toolchain is also using 32-bit time_t and nano formatting was requested.
-            rom_linker_script("newlib-nano")
+        if(time_t_size EQUAL 8)
+            # The ROM functions listed in this linker script depend on sizeof(time_t).
+            # Since ROM for ESP32-C2 was compiled for 64-bit time_t, only link these functions
+            # if the toolchain is also using 64-bit time_t.
+            rom_linker_script("newlib-time")
+
+            if(CONFIG_NEWLIB_NANO_FORMAT)
+                # nano formatting functions in ROM are also built for 64-bit time_t.
+                rom_linker_script("newlib-nano")
+            endif()
+        endif()
+
+        if(CONFIG_HEAP_TLSF_USE_ROM_IMPL)
+            # After registering the component, set the tlsf_set_rom_patches symbol as undefined
+            # to force the linker to integrate the whole `esp_rom_tlsf.c` object file inside the
+            # final binary. This is necessary because tlsf_set_rom_patches is a constructor, thus,
+            # there as no explicit reference/call to it in IDF.
+            if(CONFIG_ESP_ROM_TLSF_CHECK_PATCH)
+                target_link_libraries(${COMPONENT_LIB} PRIVATE "-u tlsf_set_rom_patches")
+            endif()
+
+            rom_linker_script("heap")
         endif()
     endif()
 

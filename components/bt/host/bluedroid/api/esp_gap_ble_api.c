@@ -787,7 +787,7 @@ esp_err_t esp_ble_gap_read_phy(esp_bd_addr_t bd_addr)
             == BT_STATUS_SUCCESS ? ESP_OK : ESP_FAIL);
 }
 
-esp_err_t esp_ble_gap_set_prefered_default_phy(esp_ble_gap_phy_mask_t tx_phy_mask,
+esp_err_t esp_ble_gap_set_preferred_default_phy(esp_ble_gap_phy_mask_t tx_phy_mask,
                                                esp_ble_gap_phy_mask_t rx_phy_mask)
 {
     btc_msg_t msg;
@@ -805,7 +805,7 @@ esp_err_t esp_ble_gap_set_prefered_default_phy(esp_ble_gap_phy_mask_t tx_phy_mas
             == BT_STATUS_SUCCESS ? ESP_OK : ESP_FAIL);
 }
 
-esp_err_t esp_ble_gap_set_prefered_phy(esp_bd_addr_t bd_addr,
+esp_err_t esp_ble_gap_set_preferred_phy(esp_bd_addr_t bd_addr,
                                        esp_ble_gap_all_phys_t all_phys_mask,
                                        esp_ble_gap_phy_mask_t tx_phy_mask,
                                        esp_ble_gap_phy_mask_t rx_phy_mask,
@@ -858,9 +858,22 @@ esp_err_t esp_ble_gap_ext_adv_set_params(uint8_t instance,
     msg.pid = BTC_PID_GAP_BLE;
     msg.act = BTC_GAP_BLE_SET_EXT_ADV_PARAMS;
 
-    arg.ext_adv_set_params.instance = instance;
+    if (ESP_BLE_IS_VALID_PARAM(params->interval_min, ESP_BLE_PRIM_ADV_INT_MIN, ESP_BLE_PRIM_ADV_INT_MAX) &&
+        ESP_BLE_IS_VALID_PARAM(params->interval_max, ESP_BLE_PRIM_ADV_INT_MIN, ESP_BLE_PRIM_ADV_INT_MAX) &&
+        ESP_BLE_IS_VALID_PARAM(params->peer_addr_type, BLE_ADDR_TYPE_PUBLIC, BLE_ADDR_TYPE_RANDOM) &&
+        ESP_BLE_IS_VALID_PARAM(params->own_addr_type, BLE_ADDR_TYPE_PUBLIC, BLE_ADDR_TYPE_RPA_RANDOM) &&
+        ESP_BLE_IS_VALID_PARAM(params->filter_policy, ADV_FILTER_ALLOW_SCAN_ANY_CON_ANY, ADV_FILTER_ALLOW_SCAN_WLST_CON_WLST) &&
+        (params->interval_min <= params->interval_max) && (params->channel_map > 0) && (params->channel_map <= ADV_CHNL_ALL) &&
+        ((params->primary_phy == ESP_BLE_GAP_PRI_PHY_1M) || (params->primary_phy == ESP_BLE_GAP_PRI_PHY_CODED)) &&
+        ((params->secondary_phy == ESP_BLE_GAP_PHY_1M) || (params->secondary_phy == ESP_BLE_GAP_PHY_2M) ||
+        (params->secondary_phy == ESP_BLE_GAP_PHY_CODED))){
+        memcpy(&arg.ext_adv_set_params.params, params, sizeof(esp_ble_gap_ext_adv_params_t));
+    } else {
+        LOG_ERROR("%s,invalid ext adv params", __func__);
+        return ESP_ERR_INVALID_ARG;
+    }
 
-    memcpy(&arg.ext_adv_set_params.params, params, sizeof(esp_ble_gap_ext_adv_params_t));
+    arg.ext_adv_set_params.instance = instance;
 
     return (btc_transfer_context(&msg, &arg, sizeof(btc_ble_5_gap_args_t), NULL)
             == BT_STATUS_SUCCESS ? ESP_OK : ESP_FAIL);

@@ -33,7 +33,7 @@ class TestPythonInstall(unittest.TestCase):
 
     def run_idf_tools(self, extra_args):  # type: (List[str]) -> str
         args = [sys.executable, '../idf_tools.py'] + extra_args
-        ret = subprocess.run(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=120)
+        ret = subprocess.run(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=300)
         return ret.stdout.decode('utf-8', 'ignore')
 
     def test_default_arguments(self):  # type: () -> None
@@ -60,6 +60,13 @@ class TestPythonInstall(unittest.TestCase):
         self.assertIn(CONSTR, output)
         self.assertIn(REQ_CORE, output)
         self.assertIn(REQ_GDBGUI, output)
+
+        # Argument that begins with '-' can't stand alone to be parsed as value
+        output = self.run_idf_tools(['install-python-env', '--features=-gdbgui'])
+        # After removing the gdbgui should not be present
+        self.assertIn(CONSTR, output)
+        self.assertIn(REQ_CORE, output)
+        self.assertNotIn(REQ_GDBGUI, output)
 
     def test_no_constraints(self):  # type: () -> None
         output = self.run_idf_tools(['install-python-env', '--no-constraints'])

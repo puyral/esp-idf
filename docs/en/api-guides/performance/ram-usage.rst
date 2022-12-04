@@ -79,10 +79,11 @@ The default stack sizes for these tasks are usually set conservatively high, to 
    - :doc:`/api-guides/event-handling` system task to execute callbacks for the default system event loop has stack size :ref:`CONFIG_ESP_SYSTEM_EVENT_TASK_STACK_SIZE`.
    - :doc:`/api-guides/lwip` TCP/IP task has stack size :ref:`CONFIG_LWIP_TCPIP_TASK_STACK_SIZE`
    :SOC_BT_SUPPORTED: - :doc:`Bluedroid Bluetooth Host </api-reference/bluetooth/index>` have task stack sizes :ref:`CONFIG_BT_BTC_TASK_STACK_SIZE`, :ref:`CONFIG_BT_BTU_TASK_STACK_SIZE`.
-   :SOC_BT_SUPPORTED: - :doc:`NimBLE Bluetooth Host </api-reference/bluetooth/nimble/index>` has task stack size :ref:`CONFIG_BT_NIMBLE_TASK_STACK_SIZE`
+   :SOC_BT_SUPPORTED: - :doc:`NimBLE Bluetooth Host </api-reference/bluetooth/nimble/index>` has task stack size :ref:`CONFIG_BT_NIMBLE_HOST_TASK_STACK_SIZE`
    - The Ethernet driver creates a task for the MAC to receive Ethernet frames. If using the default config ``ETH_MAC_DEFAULT_CONFIG`` then the task stack size is 4 KB. This setting can be changed by passing a custom :cpp:class:`eth_mac_config_t` struct when initializing the Ethernet MAC.
    - FreeRTOS idle task stack size is configured by :ref:`CONFIG_FREERTOS_IDLE_TASK_STACKSIZE`.
-   - If using the :doc:`mDNS </api-reference/protocols/mdns>` and/or :doc:`MQTT </api-reference/protocols/mqtt>` components, they create tasks with stack sizes configured by :ref:`CONFIG_MDNS_TASK_STACK_SIZE` and :ref:`CONFIG_MQTT_TASK_STACK_SIZE`, respectively. MQTT stack size can also be configured using ``task_stack`` field of :cpp:class:`esp_mqtt_client_config_t`.
+   - If using the :doc:`MQTT </api-reference/protocols/mqtt>` component, it creates a task with stack size configured by :ref:`CONFIG_MQTT_TASK_STACK_SIZE`. MQTT stack size can also be configured using ``task_stack`` field of :cpp:class:`esp_mqtt_client_config_t`.
+   - To see how to optimize RAM usage when using ``mDNS``, please check `Performance Optimization <https://espressif.github.io/esp-protocols/mdns/en/index.html#minimizing-ram-usage>`__.
 
 .. note::
 
@@ -102,7 +103,7 @@ There are some ESP-IDF configuration options that can reduce heap usage at runti
    - lwIP documentation has a section to configure :ref:`lwip-ram-usage`.
    :SOC_WIFI_SUPPORTED: - :ref:`wifi-buffer-usage` describes options to either reduce numbers of "static" buffers or reduce the maximum number of "dynamic" buffers in use, in order to minimize memory usage at possible cost of performance. Note that "static" Wi-Fi buffers are still allocated from heap when Wi-Fi is initialized and will be freed if Wi-Fi is deinitialized.
    :esp32: - The Ethernet driver allocates DMA buffers for the internal Ethernet MAC when it is initialized - configuration options are :ref:`CONFIG_ETH_DMA_BUFFER_SIZE`, :ref:`CONFIG_ETH_DMA_RX_BUFFER_NUM`, :ref:`CONFIG_ETH_DMA_TX_BUFFER_NUM`.
-   - mbedTLS TLS session memory usage can be minimized by enabling the ESP-IDF feature :ref:`CONFIG_MBEDTLS_DYNAMIC_BUFFER`.
+   - Several Mbed TLS configuration options can be used to reduce heap memory usage. See the :ref:`Mbed TLS <reducing_ram_usage_mbedtls>` docs for details.
    :esp32: - In single core mode only, it's possible to use IRAM as byte accessible memory (added to the regular heap) by enabling :ref:`CONFIG_ESP32_IRAM_AS_8BIT_ACCESSIBLE_MEMORY`. Note that this option carries a performance penalty and the risk of security issues caused by executable data. If this option is enabled then it's possible to set other options to prefer certain buffers be allocated from this memory: :ref:`mbedTLS <CONFIG_MBEDTLS_MEM_ALLOC_MODE>`, :ref:`NimBLE <CONFIG_BT_NIMBLE_MEM_ALLOC_MODE>`.
    :esp32: - Reduce :ref:`CONFIG_BTDM_CTRL_BLE_MAX_CONN` if using BLE.
    :esp32: - Reduce :ref:`CONFIG_BTDM_CTRL_BR_EDR_MAX_ACL_CONN` if using Bluetooth Classic.
@@ -130,6 +131,8 @@ The following options will reduce IRAM usage of some ESP-IDF features:
 
     - Enable :ref:`CONFIG_FREERTOS_PLACE_FUNCTIONS_INTO_FLASH`. Provided these functions are not (incorrectly) used from ISRs, this option is safe to enable in all configurations.
     - Enable :ref:`CONFIG_FREERTOS_PLACE_SNAPSHOT_FUNS_INTO_FLASH`. Enabling this option will place snapshot-related functions, such as ``vTaskGetSnapshot`` or ``uxTaskGetSnapshotAll``, in flash.
+    - Enable :ref:`CONFIG_RINGBUF_PLACE_FUNCTIONS_INTO_FLASH`. Provided these functions are not (incorrectly) used from ISRs, this option is safe to enable in all configurations.
+    - Enable :ref:`CONFIG_RINGBUF_PLACE_ISR_FUNCTIONS_INTO_FLASH`. This option is not safe to use if the ISR ringbuf functions are used from an IRAM interrupt context, e.g. if :ref:`CONFIG_UART_ISR_IN_IRAM` is enabled. For the IDF drivers where this is the case you will get an error at run-time when installing the driver in question.
     :SOC_WIFI_SUPPORTED: - Disable Wi-Fi options :ref:`CONFIG_ESP32_WIFI_IRAM_OPT` and/or :ref:`CONFIG_ESP32_WIFI_RX_IRAM_OPT`. Disabling these options will free available IRAM at the cost of Wi-Fi performance.
     :esp32c3 or esp32s3: - :ref:`CONFIG_SPI_FLASH_ROM_IMPL` enabling this option will free some IRAM but will mean that esp_flash bugfixes and new flash chip support is not available.
     :esp32: - :ref:`CONFIG_SPI_FLASH_ROM_DRIVER_PATCH` disabling this option will free some IRAM but is only available in some flash configurations (see the configuration item help text).

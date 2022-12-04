@@ -337,6 +337,7 @@ typedef union {
      * @brief ESP_BT_GAP_READ_REMOTE_NAME_EVT
      */
     struct read_rmt_name_param {
+        esp_bd_addr_t bda;                     /*!< remote bluetooth device address*/
         esp_bt_status_t stat;                  /*!< read Remote Name status */
         uint8_t rmt_name[ESP_BT_GAP_MAX_BDNAME_LEN + 1]; /*!< Remote device name */
     } read_rmt_name;                        /*!< read Remote Name parameter struct */
@@ -473,7 +474,7 @@ esp_err_t esp_bt_gap_set_scan_mode(esp_bt_connection_mode_t c_mode, esp_bt_disco
 /**
  * @brief           This function starts Inquiry and Name Discovery. This function should be called after esp_bluedroid_enable() completes successfully.
  *                  When Inquiry is halted and cached results do not contain device name, then Name Discovery will connect to the peer target to get the device name.
- *                  esp_bt_gap_cb_t will be called with ESP_BT_GAP_DISC_STATE_CHANGED_EVT when Inquriry is started or Name Discovery is completed.
+ *                  esp_bt_gap_cb_t will be called with ESP_BT_GAP_DISC_STATE_CHANGED_EVT when Inquiry is started or Name Discovery is completed.
  *                  esp_bt_gap_cb_t will be called with ESP_BT_GAP_DISC_RES_EVT each time the two types of discovery results are got.
  *
  * @param[in]       mode - Inquiry mode

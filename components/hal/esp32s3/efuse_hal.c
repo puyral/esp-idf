@@ -11,10 +11,38 @@
 #include "hal/efuse_hal.h"
 #include "hal/efuse_ll.h"
 #include "esp32s3/rom/efuse.h"
+#include "esp_attr.h"
 
-uint32_t efuse_hal_get_chip_revision(void)
+#define ESP_EFUSE_BLOCK_ERROR_BITS(error_reg, block) ((error_reg) & (0x0F << (4 * (block))))
+
+
+//The wafer_major and MSB of wafer_minor fields was allocated to other purposes when block version is v1.1.
+//Luckily only chip v0.0 have this kind of block version and efuse usage.
+//This workaround fixes the issue.
+static inline bool is_eco0(uint32_t minor_raw)
 {
-    return efuse_ll_get_chip_revision();
+    return ((minor_raw & 0x7) == 0 &&
+            efuse_ll_get_blk_version_major() == 1 && efuse_ll_get_blk_version_minor() == 1);
+}
+
+IRAM_ATTR uint32_t efuse_hal_get_major_chip_version(void)
+{
+    uint32_t minor_raw = efuse_ll_get_chip_wafer_version_minor();
+
+    if (is_eco0(minor_raw)) {
+        return 0;
+    }
+    return efuse_ll_get_chip_wafer_version_major();
+}
+
+uint32_t efuse_hal_get_minor_chip_version(void)
+{
+    uint32_t minor_raw = efuse_ll_get_chip_wafer_version_minor();
+
+    if (is_eco0(minor_raw)) {
+        return 0;
+    }
+    return minor_raw;
 }
 
 /******************* eFuse control functions *************************/
@@ -61,3 +89,21 @@ void efuse_hal_rs_calculate(const void *data, void *rs_values)
 }
 
 /******************* eFuse control functions *************************/
+
+bool efuse_hal_is_coding_error_in_block(unsigned block)
+{
+    if (block == 0) {
+        for (unsigned i = 0; i < 5; i++) {
+            if (REG_READ(EFUSE_RD_REPEAT_ERR0_REG + i * 4)) {
+                return true;
+            }
+        }
+    } else if (block <= 10) {
+        // EFUSE_RD_RS_ERR0_REG: (hi) BLOCK8, BLOCK7, BLOCK6, BLOCK5, BLOCK4, BLOCK3, BLOCK2, BLOCK1 (low)
+        // EFUSE_RD_RS_ERR1_REG:                                                     BLOCK10, BLOCK9
+        block--;
+        uint32_t error_reg = REG_READ(EFUSE_RD_RS_ERR0_REG + (block / 8) * 4);
+        return ESP_EFUSE_BLOCK_ERROR_BITS(error_reg, block % 8) != 0;
+    }
+    return false;
+}

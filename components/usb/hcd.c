@@ -12,7 +12,6 @@
 #include "freertos/semphr.h"
 #include "esp_heap_caps.h"
 #include "esp_intr_alloc.h"
-#include "esp_timer.h"
 #include "esp_err.h"
 #include "esp_rom_gpio.h"
 #include "hal/usbh_hal.h"
@@ -2343,7 +2342,7 @@ static inline void _buffer_parse_ctrl(dma_buffer_block_t *buffer)
     //Update URB status
     transfer->status = USB_TRANSFER_STATUS_COMPLETED;
     //Clear the descriptor list
-    memset(buffer->xfer_desc_list, XFER_LIST_LEN_CTRL, sizeof(usbh_ll_dma_qtd_t));
+    memset(buffer->xfer_desc_list, 0, XFER_LIST_LEN_CTRL * sizeof(usbh_ll_dma_qtd_t));
 }
 
 static inline void _buffer_parse_bulk(dma_buffer_block_t *buffer)
@@ -2359,7 +2358,7 @@ static inline void _buffer_parse_bulk(dma_buffer_block_t *buffer)
     //Update URB's status
     transfer->status = USB_TRANSFER_STATUS_COMPLETED;
     //Clear the descriptor list
-    memset(buffer->xfer_desc_list, XFER_LIST_LEN_BULK, sizeof(usbh_ll_dma_qtd_t));
+    memset(buffer->xfer_desc_list, 0, XFER_LIST_LEN_BULK * sizeof(usbh_ll_dma_qtd_t));
 }
 
 static inline void _buffer_parse_intr(dma_buffer_block_t *buffer, bool is_in, int mps)
@@ -2409,7 +2408,7 @@ static inline void _buffer_parse_intr(dma_buffer_block_t *buffer, bool is_in, in
     //Update URB's status
     transfer->status = USB_TRANSFER_STATUS_COMPLETED;
     //Clear the descriptor list
-    memset(buffer->xfer_desc_list, XFER_LIST_LEN_INTR, sizeof(usbh_ll_dma_qtd_t));
+    memset(buffer->xfer_desc_list, 0, XFER_LIST_LEN_INTR * sizeof(usbh_ll_dma_qtd_t));
 }
 
 static inline void _buffer_parse_isoc(dma_buffer_block_t *buffer, bool is_in)

@@ -1,23 +1,22 @@
-// Copyright 2019 Espressif Systems (Shanghai) PTE LTD
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+/*
+ * SPDX-FileCopyrightText: 2019-2022 Espressif Systems (Shanghai) CO LTD
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
 
 #include <stdio.h>
 #include <string.h>
 #include <esp_err.h>
 #include <esp_log.h>
 
-#include <mdns.h>
+#if defined __has_include
+#   if __has_include("mdns.h")
+#       define WITH_MDNS
+#       include "mdns.h"
+#   endif
+#endif
+
+#include <esp_netif.h>
 #include <protocomm_httpd.h>
 #include <esp_local_ctrl.h>
 #include <esp_https_server.h>
@@ -37,14 +36,15 @@ static esp_err_t start_httpd_transport(protocomm_t *pc, const esp_local_ctrl_tra
         return ESP_ERR_INVALID_ARG;
     }
 
+    esp_err_t err;
+#ifdef WITH_MDNS
     /* Extract configured port */
     uint16_t port = (
         config->httpd->transport_mode == HTTPD_SSL_TRANSPORT_SECURE ?
             config->httpd->port_secure :
             config->httpd->port_insecure
     );
-
-    esp_err_t err = mdns_service_add("Local Control Service", "_esp_local_ctrl",
+    err = mdns_service_add("Local Control Service", "_esp_local_ctrl",
                                      "_tcp", port, NULL, 0);
     if (err != ESP_OK) {
         /* mDNS is not mandatory for provisioning to work,
@@ -63,11 +63,13 @@ static esp_err_t start_httpd_transport(protocomm_t *pc, const esp_local_ctrl_tra
             ESP_LOGE(TAG, "Error adding mDNS service text item");
         }
     }
-
+#endif
     err = httpd_ssl_start(&server_handle, config->httpd);
     if (ESP_OK != err) {
         ESP_LOGE(TAG, "Error starting HTTPS service!");
+#ifdef WITH_MDNS
         mdns_service_remove("_esp_local_ctrl", "_tcp");
+#endif
         return err;
     }
 
@@ -83,10 +85,13 @@ static esp_err_t start_httpd_transport(protocomm_t *pc, const esp_local_ctrl_tra
 
 static void stop_httpd_transport(protocomm_t *pc)
 {
+#ifdef WITH_MDNS
     mdns_service_remove("_esp_local_ctrl", "_tcp");
+#endif
     protocomm_httpd_stop(pc);
-    httpd_ssl_stop(server_handle);
-    server_handle = NULL;
+    if (httpd_ssl_stop(server_handle) == ESP_OK) {
+        server_handle = NULL;
+    }
 }
 
 static esp_err_t copy_httpd_config(esp_local_ctrl_transport_config_t *dest_config, const esp_local_ctrl_transport_config_t *src_config)

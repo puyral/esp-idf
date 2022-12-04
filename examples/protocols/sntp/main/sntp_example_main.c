@@ -107,8 +107,8 @@ void app_main(void)
         struct timeval outdelta;
         while (sntp_get_sync_status() == SNTP_SYNC_STATUS_IN_PROGRESS) {
             adjtime(NULL, &outdelta);
-            ESP_LOGI(TAG, "Waiting for adjusting time ... outdelta = %li sec: %li ms: %li us",
-                        (long)outdelta.tv_sec,
+            ESP_LOGI(TAG, "Waiting for adjusting time ... outdelta = %jd sec: %li ms: %li us",
+                        (intmax_t)outdelta.tv_sec,
                         outdelta.tv_usec/1000,
                         outdelta.tv_usec%1000);
             vTaskDelay(2000 / portTICK_PERIOD_MS);
@@ -185,6 +185,8 @@ static void initialize_sntp(void)
 #else   /* LWIP_DHCP_GET_NTP_SRV && (SNTP_MAX_SERVERS > 1) */
     // otherwise, use DNS address from a pool
     sntp_setservername(0, CONFIG_SNTP_TIME_SERVER);
+
+    sntp_setservername(1, "pool.ntp.org");     // set the secondary NTP server (will be used only if SNTP_MAX_SERVERS > 1)
 #endif
 
     sntp_set_time_sync_notification_cb(time_sync_notification_cb);

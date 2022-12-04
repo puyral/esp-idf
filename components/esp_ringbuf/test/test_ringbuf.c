@@ -12,8 +12,9 @@
 #include "freertos/semphr.h"
 #include "freertos/ringbuf.h"
 #include "driver/gptimer.h"
+#include "esp_private/spi_flash_os.h"
 #include "esp_heap_caps.h"
-#include "esp_spi_flash.h"
+#include "spi_flash_mmap.h"
 #include "unity.h"
 #include "test_utils.h"
 #include "esp_rom_sys.h"
@@ -764,7 +765,7 @@ TEST_CASE("Test ring buffer ISR", "[esp_ringbuf]")
 
     //Setup timer for ISR
     gptimer_config_t config = {
-        .clk_src = GPTIMER_CLK_SRC_APB,
+        .clk_src = GPTIMER_CLK_SRC_DEFAULT,
         .direction = GPTIMER_COUNT_UP,
         .resolution_hz = 1000000,
     };
@@ -779,12 +780,14 @@ TEST_CASE("Test ring buffer ISR", "[esp_ringbuf]")
     };
     TEST_ESP_OK(gptimer_register_event_callbacks(gptimer, &cbs, NULL));
     TEST_ESP_OK(gptimer_set_alarm_action(gptimer, &alarm_config));
+    TEST_ESP_OK(gptimer_enable(gptimer));
     TEST_ESP_OK(gptimer_start(gptimer));
     //Wait for ISR to complete multiple iterations
     xSemaphoreTake(done_sem, portMAX_DELAY);
 
     //Cleanup
     TEST_ESP_OK(gptimer_stop(gptimer));
+    TEST_ESP_OK(gptimer_disable(gptimer));
     TEST_ESP_OK(gptimer_del_timer(gptimer));
     vSemaphoreDelete(done_sem);
     for (int i = 0; i < NO_OF_RB_TYPES; i++) {
@@ -1021,11 +1024,16 @@ TEST_CASE("Test static ring buffer SMP", "[esp_ringbuf]")
 static IRAM_ATTR __attribute__((noinline)) bool iram_ringbuf_test(void)
 {
     bool result = true;
-
+    uint8_t item[4];
+    size_t item_size;
     RingbufHandle_t handle = xRingbufferCreate(CONT_DATA_TEST_BUFF_LEN, RINGBUF_TYPE_NOSPLIT);
     result = result && (handle != NULL);
     spi_flash_guard_get()->start(); // Disables flash cache
+
     xRingbufferGetMaxItemSize(handle);
+    xRingbufferSendFromISR(handle, (void *)item, sizeof(item), NULL);
+    xRingbufferReceiveFromISR(handle, &item_size);
+
     spi_flash_guard_get()->end(); // Re-enables flash cache
     vRingbufferDelete(handle);
 

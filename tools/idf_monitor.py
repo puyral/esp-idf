@@ -75,6 +75,7 @@ class Monitor:
         print_filter,  # type: str
         make='make',  # type: str
         encrypted=False,  # type: bool
+        reset=True,  # type: bool
         toolchain_prefix=DEFAULT_TOOLCHAIN_PREFIX,  # type: str
         eol='CRLF',  # type: str
         decode_coredumps=COREDUMP_DECODE_INFO,  # type: str
@@ -83,15 +84,16 @@ class Monitor:
         websocket_client=None,  # type: Optional[WebSocketClient]
         enable_address_decoding=True,  # type: bool
         timestamps=False,  # type: bool
-        timestamp_format=''  # type: str
+        timestamp_format='',  # type: str
+        force_color=False  # type: bool
     ):
         self.event_queue = queue.Queue()  # type: queue.Queue
         self.cmd_queue = queue.Queue()  # type: queue.Queue
         self.console = miniterm.Console()
-
-        sys.stderr = get_converter(sys.stderr, decode_output=True)
-        self.console.output = get_converter(self.console.output)
-        self.console.byte_output = get_converter(self.console.byte_output)
+        # if the variable is set ANSI will be printed even if we do not print to terminal
+        sys.stderr = get_converter(sys.stderr, decode_output=True, force_color=force_color)
+        self.console.output = get_converter(self.console.output, force_color=force_color)
+        self.console.byte_output = get_converter(self.console.byte_output, force_color=force_color)
 
         self.elf_file = elf_file or ''
         self.elf_exists = os.path.exists(self.elf_file)
@@ -109,7 +111,7 @@ class Monitor:
         if isinstance(self, SerialMonitor):
             socket_mode = serial_instance.port.startswith('socket://')
             self.serial = serial_instance
-            self.serial_reader = SerialReader(self.serial, self.event_queue)
+            self.serial_reader = SerialReader(self.serial, self.event_queue, reset)
 
             self.gdb_helper = GDBHelper(toolchain_prefix, websocket_client, self.elf_file, self.serial.port,
                                         self.serial.baudrate) if self.elf_exists else None
@@ -124,7 +126,7 @@ class Monitor:
 
         cls = SerialHandler if self.elf_exists else SerialHandlerNoElf
         self.serial_handler = cls(b'', socket_mode, self.logger, decode_panic, PANIC_IDLE, b'', target,
-                                  False, False, self.serial, encrypted, self.elf_file)
+                                  False, False, self.serial, encrypted, reset, self.elf_file)
 
         self.console_parser = ConsoleParser(eol)
         self.console_reader = ConsoleReader(self.console, self.event_queue, self.cmd_queue, self.console_parser,
@@ -223,7 +225,7 @@ class Monitor:
             self.serial_handler.handle_serial_input(data, self.console_parser, self.coredump,
                                                     self.gdb_helper, self._line_matcher,
                                                     self.check_gdb_stub_and_run,
-                                                    finalize_line=not self.coredump.in_progress)
+                                                    finalize_line=not self.coredump or not self.coredump.in_progress)
         else:
             raise RuntimeError('Bad event data %r' % ((event_tag, data),))
 
@@ -232,7 +234,8 @@ class SerialMonitor(Monitor):
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:  # type: ignore
         """ Use 'with self' to temporarily disable monitoring behaviour """
         self.console_reader.start()
-        self.serial_reader.gdb_exit = self.gdb_helper.gdb_exit  # write gdb_exit flag
+        if self.elf_exists:
+            self.serial_reader.gdb_exit = self.gdb_helper.gdb_exit  # write gdb_exit flag
         self.serial_reader.start()
 
     def _pre_start(self) -> None:
@@ -343,6 +346,7 @@ def main() -> None:
                       args.print_filter,
                       args.make,
                       args.encrypted,
+                      not args.no_reset,
                       args.toolchain_prefix,
                       args.eol,
                       args.decode_coredumps,
@@ -351,7 +355,8 @@ def main() -> None:
                       ws,
                       not args.disable_address_decoding,
                       args.timestamps,
-                      args.timestamp_format)
+                      args.timestamp_format,
+                      args.force_color)
 
         yellow_print('--- Quit: {} | Menu: {} | Help: {} followed by {} ---'.format(
             key_description(monitor.console_parser.exit_key),

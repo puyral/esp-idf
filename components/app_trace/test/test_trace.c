@@ -12,6 +12,7 @@
 #include "driver/gptimer.h"
 #include "esp_intr_alloc.h"
 #include "esp_rom_sys.h"
+#include "esp_cpu.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
@@ -156,7 +157,7 @@ static void esp_apptrace_dummy_task(void *p)
 
     for (int i = 0; i < arg->timers_num; i++) {
         gptimer_config_t timer_config = {
-            .clk_src = GPTIMER_CLK_SRC_APB,
+            .clk_src = GPTIMER_CLK_SRC_DEFAULT,
             .direction = GPTIMER_COUNT_UP,
             .resolution_hz = 1000000,
         };
@@ -172,13 +173,14 @@ static void esp_apptrace_dummy_task(void *p)
             .on_alarm = arg->timers[i].isr_func,
         };
         TEST_ESP_OK(gptimer_register_event_callbacks(arg->timers[i].gptimer, &cbs, &arg->timers[i]));
+        TEST_ESP_OK(gptimer_enable(arg->timers[i].gptimer));
         TEST_ESP_OK(gptimer_set_alarm_action(arg->timers[i].gptimer, &alarm_config));
         TEST_ESP_OK(gptimer_start(arg->timers[i].gptimer));
     }
 
     int i = 0;
     while (!arg->stop) {
-        ESP_APPTRACE_TEST_LOGD("%x: dummy task work %d.%d", xTaskGetCurrentTaskHandle(), cpu_hal_get_core_id(), i++);
+        ESP_APPTRACE_TEST_LOGD("%x: dummy task work %d.%d", xTaskGetCurrentTaskHandle(), esp_cpu_get_core_id(), i++);
         if (tmo_ticks) {
             vTaskDelay(tmo_ticks);
         }
@@ -186,6 +188,7 @@ static void esp_apptrace_dummy_task(void *p)
 
     for (int i = 0; i < arg->timers_num; i++) {
         TEST_ESP_OK(gptimer_stop(arg->timers[i].gptimer));
+        TEST_ESP_OK(gptimer_disable(arg->timers[i].gptimer));
         TEST_ESP_OK(gptimer_del_timer(arg->timers[i].gptimer));
     }
     xSemaphoreGive(arg->done);
@@ -203,12 +206,12 @@ static void esp_apptrace_test_task(void *p)
 
     for (int i = 0; i < arg->timers_num; i++) {
         gptimer_config_t timer_config = {
-            .clk_src = GPTIMER_CLK_SRC_APB,
+            .clk_src = GPTIMER_CLK_SRC_DEFAULT,
             .direction = GPTIMER_COUNT_UP,
             .resolution_hz = 1000000,
         };
         TEST_ESP_OK(gptimer_new_timer(&timer_config, &arg->timers[i].gptimer));
-        *(uint32_t *)arg->timers[i].data.buf = ((uint32_t)arg->timers[i].gptimer) | (1 << 31) | (cpu_hal_get_core_id() ? 0x1 : 0);
+        *(uint32_t *)arg->timers[i].data.buf = ((uint32_t)arg->timers[i].gptimer) | (1 << 31) | (esp_cpu_get_core_id() ? 0x1 : 0);
         ESP_APPTRACE_TEST_LOGI("%x: start timer %x period %u us", xTaskGetCurrentTaskHandle(), arg->timers[i].gptimer, arg->timers[i].data.period);
         gptimer_alarm_config_t alarm_config = {
             .reload_count = 0,
@@ -219,11 +222,12 @@ static void esp_apptrace_test_task(void *p)
             .on_alarm = arg->timers[i].isr_func,
         };
         TEST_ESP_OK(gptimer_register_event_callbacks(arg->timers[i].gptimer, &cbs, &arg->timers[i]));
+        TEST_ESP_OK(gptimer_enable(arg->timers[i].gptimer));
         TEST_ESP_OK(gptimer_set_alarm_action(arg->timers[i].gptimer, &alarm_config));
         TEST_ESP_OK(gptimer_start(arg->timers[i].gptimer));
     }
 
-    *(uint32_t *)arg->data.buf = (uint32_t)xTaskGetCurrentTaskHandle() | (cpu_hal_get_core_id() ? 0x1 : 0);
+    *(uint32_t *)arg->data.buf = (uint32_t)xTaskGetCurrentTaskHandle() | (esp_cpu_get_core_id() ? 0x1 : 0);
     arg->data.wr_cnt = 0;
     arg->data.wr_err = 0;
     while (!arg->stop) {
@@ -257,6 +261,7 @@ static void esp_apptrace_test_task(void *p)
 
     for (int i = 0; i < arg->timers_num; i++) {
         TEST_ESP_OK(gptimer_stop(arg->timers[i].gptimer));
+        TEST_ESP_OK(gptimer_disable(arg->timers[i].gptimer));
         TEST_ESP_OK(gptimer_del_timer(arg->timers[i].gptimer));
     }
     xSemaphoreGive(arg->done);
@@ -305,18 +310,20 @@ static uint64_t esp_apptrace_test_ts_get(void)
 static void esp_apptrace_test_ts_init(void)
 {
     gptimer_config_t timer_config = {
-        .clk_src = GPTIMER_CLK_SRC_APB,
+        .clk_src = GPTIMER_CLK_SRC_DEFAULT,
         .direction = GPTIMER_COUNT_UP,
         .resolution_hz = 10000000,
     };
     TEST_ESP_OK(gptimer_new_timer(&timer_config, &ts_gptimer));
     ESP_APPTRACE_TEST_LOGI("Use timer %x for TS", ts_gptimer);
+    TEST_ESP_OK(gptimer_enable(ts_gptimer));
     TEST_ESP_OK(gptimer_start(ts_gptimer));
 }
 
 static void esp_apptrace_test_ts_cleanup(void)
 {
     TEST_ESP_OK(gptimer_stop(ts_gptimer));
+    TEST_ESP_OK(gptimer_disable(ts_gptimer));
     TEST_ESP_OK(gptimer_del_timer(ts_gptimer));
     ts_gptimer = NULL;
 }
@@ -646,7 +653,7 @@ static void esp_logtrace_task(void *p)
         ESP_LOGI(TAG, "%p: sample print 4 %c", xTaskGetCurrentTaskHandle(), ((i & 0xFF) % 95) + 32);
         ESP_LOGI(TAG, "%p: sample print 5 %f", xTaskGetCurrentTaskHandle(), 1.0);
         ESP_LOGI(TAG, "%p: sample print 6 %f", xTaskGetCurrentTaskHandle(), 3.45);
-        ESP_LOGI(TAG, "%p: logtrace task work %d.%d", xTaskGetCurrentTaskHandle(), cpu_hal_get_core_id(), i);
+        ESP_LOGI(TAG, "%p: logtrace task work %d.%d", xTaskGetCurrentTaskHandle(), esp_cpu_get_core_id(), i);
         if (++i == 10000) {
             break;
         }
@@ -729,6 +736,7 @@ static void esp_sysviewtrace_test_task(void *p)
             .on_alarm = esp_sysview_test_timer_isr,
         };
         TEST_ESP_OK(gptimer_register_event_callbacks(arg->timer->gptimer, &cbs, arg->timer));
+        TEST_ESP_OK(gptimer_enable(arg->timer->gptimer));
         TEST_ESP_OK(gptimer_set_alarm_action(arg->timer->gptimer, &alarm_config));
         TEST_ESP_OK(gptimer_start(arg->timer->gptimer));
     }
@@ -791,7 +799,7 @@ TEST_CASE("SysView trace test 1", "[trace][ignore]")
     };
 
     gptimer_config_t timer_config = {
-        .clk_src = GPTIMER_CLK_SRC_APB,
+        .clk_src = GPTIMER_CLK_SRC_DEFAULT,
         .direction = GPTIMER_COUNT_UP,
         .resolution_hz = 1000000,
     };
@@ -814,8 +822,10 @@ TEST_CASE("SysView trace test 1", "[trace][ignore]")
     xSemaphoreTake(arg2.done, portMAX_DELAY);
     vSemaphoreDelete(arg2.done);
     TEST_ESP_OK(gptimer_stop(tim_arg1.gptimer));
+    TEST_ESP_OK(gptimer_disable(tim_arg1.gptimer));
     TEST_ESP_OK(gptimer_del_timer(tim_arg1.gptimer));
     TEST_ESP_OK(gptimer_stop(tim_arg2.gptimer));
+    TEST_ESP_OK(gptimer_disable(tim_arg2.gptimer));
     TEST_ESP_OK(gptimer_del_timer(tim_arg2.gptimer));
 }
 
@@ -870,7 +880,7 @@ TEST_CASE("SysView trace test 2", "[trace][ignore]")
     };
 
     gptimer_config_t timer_config = {
-        .clk_src = GPTIMER_CLK_SRC_APB,
+        .clk_src = GPTIMER_CLK_SRC_DEFAULT,
         .direction = GPTIMER_COUNT_UP,
         .resolution_hz = 1000000,
     };
@@ -907,8 +917,10 @@ TEST_CASE("SysView trace test 2", "[trace][ignore]")
     vSemaphoreDelete(arg4.done);
     vSemaphoreDelete(test_sync);
     TEST_ESP_OK(gptimer_stop(tim_arg1.gptimer));
+    TEST_ESP_OK(gptimer_disable(tim_arg1.gptimer));
     TEST_ESP_OK(gptimer_del_timer(tim_arg1.gptimer));
     TEST_ESP_OK(gptimer_stop(tim_arg2.gptimer));
+    TEST_ESP_OK(gptimer_disable(tim_arg2.gptimer));
     TEST_ESP_OK(gptimer_del_timer(tim_arg2.gptimer));
 }
 #endif // #if CONFIG_APPTRACE_SV_ENABLE == 0

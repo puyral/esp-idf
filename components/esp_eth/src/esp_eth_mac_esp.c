@@ -6,21 +6,22 @@
 #include <string.h>
 #include <stdlib.h>
 #include <sys/cdefs.h>
+#include <stdarg.h>
 #include "esp_private/periph_ctrl.h"
 #include "driver/gpio.h"
 #include "esp_attr.h"
 #include "esp_log.h"
 #include "esp_check.h"
-#include "esp_eth.h"
+#include "esp_eth_driver.h"
 #include "esp_pm.h"
 #include "esp_mac.h"
+#include "esp_cpu.h"
 #include "esp_heap_caps.h"
 #include "esp_intr_alloc.h"
 #include "esp_private/esp_clk.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/semphr.h"
-#include "hal/cpu_hal.h"
 #include "hal/emac_hal.h"
 #include "hal/gpio_hal.h"
 #include "soc/soc.h"
@@ -228,7 +229,26 @@ static esp_err_t emac_esp32_transmit(esp_eth_mac_t *mac, uint8_t *buf, uint32_t 
     esp_err_t ret = ESP_OK;
     emac_esp32_t *emac = __containerof(mac, emac_esp32_t, parent);
     uint32_t sent_len = emac_hal_transmit_frame(&emac->hal, buf, length);
-    ESP_GOTO_ON_FALSE(sent_len == length, ESP_ERR_INVALID_SIZE, err, TAG, "insufficient TX buffer size");
+    ESP_GOTO_ON_FALSE(sent_len == length, ESP_ERR_NO_MEM, err, TAG, "insufficient TX buffer size");
+    return ESP_OK;
+err:
+    return ret;
+}
+
+static esp_err_t emac_esp32_transmit_multiple_bufs(esp_eth_mac_t *mac, uint32_t argc, va_list args)
+{
+    esp_err_t ret = ESP_OK;
+    emac_esp32_t *emac = __containerof(mac, emac_esp32_t, parent);
+    uint8_t *bufs[argc];
+    uint32_t len[argc];
+    uint32_t exp_len = 0;
+    for (int i = 0; i < argc; i++) {
+        bufs[i] = va_arg(args, uint8_t*);
+        len[i] = va_arg(args, uint32_t);
+        exp_len += len[i];
+    }
+    uint32_t sent_len = emac_hal_transmit_multiple_buf_frame(&emac->hal, bufs, len, argc);
+    ESP_GOTO_ON_FALSE(sent_len == exp_len, ESP_ERR_INVALID_SIZE, err, TAG, "insufficient TX buffer size");
     return ESP_OK;
 err:
     return ret;
@@ -487,7 +507,7 @@ static esp_err_t esp_emac_alloc_driver_obj(const eth_mac_config_t *config, emac_
     /* create rx task */
     BaseType_t core_num = tskNO_AFFINITY;
     if (config->flags & ETH_MAC_FLAG_PIN_TO_CORE) {
-        core_num = cpu_hal_get_core_id();
+        core_num = esp_cpu_get_core_id();
     }
     BaseType_t xReturned = xTaskCreatePinnedToCore(emac_esp32_rx_task, "emac_rx", config->rx_task_stack_size, emac,
                            config->rx_task_prio, &emac->rx_task_hdl, core_num);
@@ -619,6 +639,7 @@ esp_eth_mac_t *esp_eth_mac_new_esp32(const eth_esp32_emac_config_t *esp32_config
     emac->parent.set_peer_pause_ability = emac_esp32_set_peer_pause_ability;
     emac->parent.enable_flow_ctrl = emac_esp32_enable_flow_ctrl;
     emac->parent.transmit = emac_esp32_transmit;
+    emac->parent.transmit_vargs = emac_esp32_transmit_multiple_bufs;
     emac->parent.receive = emac_esp32_receive;
     return &(emac->parent);
 

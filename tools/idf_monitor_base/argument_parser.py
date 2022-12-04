@@ -18,10 +18,16 @@ def get_parser():  # type: () -> argparse.ArgumentParser
     )
 
     parser.add_argument(
+        '--no-reset',
+        help='Do not reset the chip on monitor startup',
+        action='store_true'
+    )
+
+    parser.add_argument(
         '--disable-address-decoding', '-d',
         help="Don't print lines about decoded addresses from the application ELF file",
         action='store_true',
-        default=os.environ.get('ESP_MONITOR_DECODE') == 0
+        default=os.getenv('ESP_MONITOR_DECODE') == '0'
     )
 
     parser.add_argument(
@@ -107,5 +113,11 @@ def get_parser():  # type: () -> argparse.ArgumentParser
         default=os.environ.get('ESP_IDF_MONITOR_TIMESTAMP_FORMAT', '%Y-%m-%d %H:%M:%S'),
         help='Set a strftime()-compatible timestamp format'
     )
+
+    parser.add_argument(
+        '--force-color',
+        help='Always colored monitor output, even if output is redirected.',
+        default=False,
+        action='store_true')
 
     return parser

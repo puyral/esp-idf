@@ -59,6 +59,8 @@ typedef enum {
     BTC_PID_SPP,
     BTC_PID_HD,
     BTC_PID_HH,
+    BTC_PID_L2CAP,
+    BTC_PID_SDP,
 #if (BTC_HF_INCLUDED == TRUE)
     BTC_PID_HF,
 #endif /* BTC_HF_INCLUDED */
@@ -121,6 +123,13 @@ bt_status_t btc_init(void);
 void btc_deinit(void);
 bool btc_check_queue_is_congest(void);
 int get_btc_work_queue_size(void);
+
+/**
+ * get the BTC thread handle
+ * @return           NULL: fail
+ *                   others: pointer of osi_thread structure of BTC
+ */
+osi_thread_t *btc_get_current_thread(void);
 
 #ifdef __cplusplus
 }

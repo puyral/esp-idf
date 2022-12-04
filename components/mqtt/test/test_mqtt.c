@@ -23,6 +23,7 @@
 #include "test_mqtt_client_broker.h"
 #include "test_mqtt_connection.h"
 #include "esp_mac.h"
+#include "spi_flash_mmap.h"
 
 static void test_leak_setup(const char * file, long line)
 {
@@ -30,7 +31,7 @@ static void test_leak_setup(const char * file, long line)
     struct timeval te;
     gettimeofday(&te, NULL); // get current time
     esp_read_mac(mac, ESP_MAC_WIFI_STA);
-    printf("%s:%ld: time=%ld.%lds, mac:" MACSTR "\n", file, line, te.tv_sec, te.tv_usec, MAC2STR(mac));
+    printf("%s:%ld: time=%jd.%lds, mac:" MACSTR "\n", file, line, (intmax_t)te.tv_sec, te.tv_usec, MAC2STR(mac));
     test_utils_record_free_mem();
 }
 
@@ -38,7 +39,7 @@ TEST_CASE("mqtt init with invalid url", "[mqtt][leaks=0]")
 {
     test_leak_setup(__FILE__, __LINE__);
     const esp_mqtt_client_config_t mqtt_cfg = {
-            .uri = "INVALID",
+            .broker.address.uri = "INVALID",
     };
     esp_mqtt_client_handle_t client = esp_mqtt_client_init(&mqtt_cfg);
     TEST_ASSERT_EQUAL(NULL, client );
@@ -49,7 +50,7 @@ TEST_CASE("mqtt init and deinit", "[mqtt][leaks=0]")
     test_leak_setup(__FILE__, __LINE__);
     const esp_mqtt_client_config_t mqtt_cfg = {
             // no connection takes place, but the uri has to be valid for init() to succeed
-            .uri = "mqtts://localhost:8883",
+            .broker.address.uri = "mqtts://localhost:8883",
     };
     esp_mqtt_client_handle_t client = esp_mqtt_client_init(&mqtt_cfg);
     TEST_ASSERT_NOT_EQUAL(NULL, client );
@@ -73,7 +74,7 @@ TEST_CASE("mqtt enqueue and destroy outbox", "[mqtt][leaks=0]")
     const int size = 2000;
     const esp_mqtt_client_config_t mqtt_cfg = {
             // no connection takes place, but the uri has to be valid for init() to succeed
-            .uri = "mqtts://localhost:8883",
+            .broker.address.uri = "mqtts://localhost:8883",
     };
     esp_mqtt_client_handle_t client = esp_mqtt_client_init(&mqtt_cfg);
     TEST_ASSERT_NOT_EQUAL(NULL, client );

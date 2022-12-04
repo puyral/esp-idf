@@ -18,7 +18,7 @@ static const char *TAG = "example";
 #define EXAMPLE_EC11_GPIO_A 0
 #define EXAMPLE_EC11_GPIO_B 2
 
-static bool example_pcnt_on_reach(pcnt_unit_handle_t unit, pcnt_watch_event_data_t *edata, void *user_ctx)
+static bool example_pcnt_on_reach(pcnt_unit_handle_t unit, const pcnt_watch_event_data_t *edata, void *user_ctx)
 {
     BaseType_t high_task_wakeup;
     QueueHandle_t queue = (QueueHandle_t)user_ctx;
@@ -74,6 +74,8 @@ void app_main(void)
     QueueHandle_t queue = xQueueCreate(10, sizeof(int));
     ESP_ERROR_CHECK(pcnt_unit_register_event_callbacks(pcnt_unit, &cbs, queue));
 
+    ESP_LOGI(TAG, "enable pcnt unit");
+    ESP_ERROR_CHECK(pcnt_unit_enable(pcnt_unit));
     ESP_LOGI(TAG, "clear pcnt unit");
     ESP_ERROR_CHECK(pcnt_unit_clear_count(pcnt_unit));
     ESP_LOGI(TAG, "start pcnt unit");

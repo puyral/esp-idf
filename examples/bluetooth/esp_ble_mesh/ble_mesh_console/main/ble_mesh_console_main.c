@@ -28,7 +28,7 @@ static void initialize_filesystem(void)
         .max_files = 4,
         .format_if_mount_failed = true
     };
-    esp_err_t err = esp_vfs_fat_spiflash_mount(MOUNT_PATH, "storage", &mount_config, &wl_handle);
+    esp_err_t err = esp_vfs_fat_spiflash_mount_rw_wl(MOUNT_PATH, "storage", &mount_config, &wl_handle);
     if (err != ESP_OK) {
         return;
     }
@@ -67,7 +67,6 @@ void app_main(void)
 #else
     repl_config.prompt = "esp32>";
 #endif
-    printf("!!!ready!!!\n");
 
     // init console REPL environment
     ESP_ERROR_CHECK(esp_console_new_repl_uart(&uart_config, &repl_config, &repl));
@@ -84,7 +83,7 @@ void app_main(void)
 #if (CONFIG_BLE_MESH_CFG_CLI)
     ble_mesh_register_configuration_client_model();
 #endif
-
+    printf("!!!ready!!!\n");
     // start console REPL
     ESP_ERROR_CHECK(esp_console_start_repl(repl));
 }

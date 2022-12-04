@@ -13,7 +13,7 @@
 #include "soc/gpio_reg.h"
 #include "soc/spi_mem_reg.h"
 #include "soc/extmem_reg.h"
-#include "regi2c_ulp.h"
+#include "soc/regi2c_ulp.h"
 #include "regi2c_ctrl.h"
 #include "esp_hw_log.h"
 #include "esp_efuse.h"
@@ -152,7 +152,7 @@ void rtc_init(rtc_config_t cfg)
 #if !CONFIG_IDF_ENV_FPGA
     if (cfg.cali_ocode) {
         uint32_t rtc_calib_version = 0;
-        esp_efuse_read_field_blob(ESP_EFUSE_BLOCK2_VERSION, &rtc_calib_version, 32);
+        esp_efuse_read_field_blob(ESP_EFUSE_BLK_VERSION_MINOR, &rtc_calib_version, ESP_EFUSE_BLK_VERSION_MINOR[0]->bit_count); // IDF-5366
         if (rtc_calib_version == 2) {
             set_ocode_by_efuse(rtc_calib_version);
         } else {
@@ -244,13 +244,11 @@ static void calibrate_ocode(void)
     4. wait o-code calibration done flag(odone_flag & bg_odone_flag) or timeout;
     5. set cpu to old-config.
     */
-    rtc_slow_freq_t slow_clk_freq = rtc_clk_slow_freq_get();
-    rtc_slow_freq_t rtc_slow_freq_x32k = RTC_SLOW_FREQ_32K_XTAL;
-    rtc_slow_freq_t rtc_slow_freq_8MD256 = RTC_SLOW_FREQ_8MD256;
+    soc_rtc_slow_clk_src_t slow_clk_src = rtc_clk_slow_src_get();
     rtc_cal_sel_t cal_clk = RTC_CAL_RTC_MUX;
-    if (slow_clk_freq == (rtc_slow_freq_x32k)) {
+    if (slow_clk_src == SOC_RTC_SLOW_CLK_SRC_XTAL32K) {
         cal_clk = RTC_CAL_32K_XTAL;
-    } else if (slow_clk_freq == rtc_slow_freq_8MD256) {
+    } else if (slow_clk_src == SOC_RTC_SLOW_CLK_SRC_RC_FAST_D256) {
         cal_clk  = RTC_CAL_8MD256;
     }
 

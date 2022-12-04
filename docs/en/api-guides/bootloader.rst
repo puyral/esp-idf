@@ -34,12 +34,12 @@ The bootloader does not support booting apps from older versions of ESP-IDF. Whe
     Before ESP-IDF V2.1
     ^^^^^^^^^^^^^^^^^^^
 
-    Bootloaders built from very old versions of ESP-IDF (before ESP-IDF V2.1) perform less hardware configuration than newer versions. When using a bootloader from these early ESP-IDF versions and building a new app, enable the config option :ref:`CONFIG_ESP32_COMPATIBLE_PRE_V2_1_BOOTLOADERS`.
+    Bootloaders built from very old versions of ESP-IDF (before ESP-IDF V2.1) perform less hardware configuration than newer versions. When using a bootloader from these early ESP-IDF versions and building a new app, enable the config option :ref:`CONFIG_APP_COMPATIBLE_PRE_V2_1_BOOTLOADERS`.
 
     Before ESP-IDF V3.1
     ^^^^^^^^^^^^^^^^^^^
 
-    Bootloaders built from versions of ESP-IDF before V3.1 do not support MD5 checksums in the partition table binary. When using a bootloader from these ESP-IDF versions and building a new app, enable the config option :ref:`CONFIG_ESP32_COMPATIBLE_PRE_V3_1_BOOTLOADERS`.
+    Bootloaders built from versions of ESP-IDF before V3.1 do not support MD5 checksums in the partition table binary. When using a bootloader from these ESP-IDF versions and building a new app, enable the config option :ref:`CONFIG_APP_COMPATIBLE_PRE_V3_1_BOOTLOADERS`.
 
 SPI Flash Configuration
 ^^^^^^^^^^^^^^^^^^^^^^^
@@ -143,10 +143,12 @@ Options to work around this are:
 
 When Secure Boot V2 is enabled, there is also an absolute binary size limit of {IDF_TARGET_MAX_BOOTLOADER_SIZE} (excluding the 4 KB signature), because the bootloader is first loaded into a fixed size buffer for verification.
 
-Fast boot from Deep Sleep
--------------------------
+.. only:: SOC_RTC_FAST_MEM_SUPPORTED
 
-The bootloader has the :ref:`CONFIG_BOOTLOADER_SKIP_VALIDATE_IN_DEEP_SLEEP` option which allows the wake-up time from deep sleep to be reduced (useful for reducing power consumption). This option is available when :ref:`CONFIG_SECURE_BOOT` option is disabled. Reduction of time is achieved due to the lack of image verification. During the first boot, the bootloader stores the address of the application being launched in the RTC FAST memory. And during the awakening, this address is used for booting without any checks, thus fast loading is achieved.
+    Fast boot from Deep Sleep
+    -------------------------
+
+    The bootloader has the :ref:`CONFIG_BOOTLOADER_SKIP_VALIDATE_IN_DEEP_SLEEP` option which allows the wake-up time from deep sleep to be reduced (useful for reducing power consumption). This option is available when :ref:`CONFIG_SECURE_BOOT` option is disabled. Reduction of time is achieved due to the lack of image verification. During the first boot, the bootloader stores the address of the application being launched in the RTC FAST memory. And during the awakening, this address is used for booting without any checks, thus fast loading is achieved.
 
 Custom bootloader
 -----------------

@@ -39,21 +39,57 @@ extern const char rsa_private_pem_end[]   asm("_binary_private_pem_end");
 
 #define OTA_URL_SIZE 256
 
-static esp_decrypt_handle_t decrypt_handle;
+static esp_err_t validate_image_header(esp_app_desc_t *new_app_info)
+{
+    if (new_app_info == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    const esp_partition_t *running = esp_ota_get_running_partition();
+    esp_app_desc_t running_app_info;
+    if (esp_ota_get_partition_description(running, &running_app_info) == ESP_OK) {
+        ESP_LOGI(TAG, "Running firmware version: %s", running_app_info.version);
+    }
+
+#ifndef CONFIG_EXAMPLE_SKIP_VERSION_CHECK
+    if (memcmp(new_app_info->version, running_app_info.version, sizeof(new_app_info->version)) == 0) {
+        ESP_LOGW(TAG, "Current running version is the same as a new. We will not continue the update.");
+        return ESP_FAIL;
+    }
+#endif
+    return ESP_OK;
+}
 
 static esp_err_t _decrypt_cb(decrypt_cb_arg_t *args, void *user_ctx)
 {
+    if (args == NULL || user_ctx == NULL) {
+        ESP_LOGE(TAG, "_decrypt_cb: Invalid argument");
+        return ESP_ERR_INVALID_ARG;
+    }
     esp_err_t err;
     pre_enc_decrypt_arg_t pargs = {};
-    pargs.data_in = (char *) args->data_in;
+    pargs.data_in = args->data_in;
     pargs.data_in_len = args->data_in_len;
-    err = esp_encrypted_img_decrypt_data(decrypt_handle, &pargs);
+    err = esp_encrypted_img_decrypt_data((esp_decrypt_handle_t *)user_ctx, &pargs);
     if (err != ESP_OK && err != ESP_ERR_NOT_FINISHED) {
         return err;
     }
+    static bool is_image_verified = false;
     if (pargs.data_out_len > 0) {
         args->data_out = pargs.data_out;
         args->data_out_len = pargs.data_out_len;
+        if (!is_image_verified) {
+            is_image_verified = true;
+            const int app_desc_offset = sizeof(esp_image_header_t) + sizeof(esp_image_segment_header_t);
+            // It is unlikely to not have App Descriptor available in first iteration of decrypt callback.
+            assert(args->data_out_len >= app_desc_offset + sizeof(esp_app_desc_t));
+            esp_app_desc_t *app_info = (esp_app_desc_t *) &args->data_out[app_desc_offset];
+            err = validate_image_header(app_info);
+            if (err != ESP_OK) {
+                free(pargs.data_out);
+            }
+            return err;
+        }
     } else {
         args->data_out_len = 0;
     }
@@ -75,7 +111,7 @@ void pre_encrypted_ota_task(void *pvParameter)
     esp_decrypt_cfg_t cfg = {};
     cfg.rsa_pub_key = rsa_private_pem_start;
     cfg.rsa_pub_key_len = rsa_private_pem_end - rsa_private_pem_start;
-    decrypt_handle = esp_encrypted_img_decrypt_start(&cfg);
+    esp_decrypt_handle_t decrypt_handle = esp_encrypted_img_decrypt_start(&cfg);
     if (!decrypt_handle) {
         ESP_LOGE(TAG, "OTA upgrade failed");
         vTaskDelete(NULL);
@@ -106,7 +142,7 @@ void pre_encrypted_ota_task(void *pvParameter)
         .max_http_request_size = CONFIG_EXAMPLE_HTTP_REQUEST_SIZE,
 #endif
         .decrypt_cb = _decrypt_cb,
-        .decrypt_user_ctx = NULL
+        .decrypt_user_ctx = (void *)decrypt_handle,
     };
 
     esp_https_ota_handle_t https_ota_handle = NULL;

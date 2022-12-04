@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: 2018-2021 Espressif Systems (Shanghai) CO LTD
+ * SPDX-FileCopyrightText: 2018-2022 Espressif Systems (Shanghai) CO LTD
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -17,6 +17,7 @@
 #include "soc/spi_reg.h"
 #include "soc/soc_caps.h"
 #include "soc/soc_pins.h"
+#include "hal/efuse_hal.h"
 #include "hal/gpio_hal.h"
 #include "flash_qio_mode.h"
 #include "bootloader_common.h"
@@ -46,16 +47,16 @@ void IRAM_ATTR bootloader_flash_clock_config(const esp_image_header_t* pfhdr)
 {
     uint32_t spi_clk_div = 0;
     switch (pfhdr->spi_speed) {
-        case ESP_IMAGE_SPI_SPEED_80M:
+        case ESP_IMAGE_SPI_SPEED_DIV_1:
             spi_clk_div = 1;
             break;
-        case ESP_IMAGE_SPI_SPEED_40M:
+        case ESP_IMAGE_SPI_SPEED_DIV_2:
             spi_clk_div = 2;
             break;
-        case ESP_IMAGE_SPI_SPEED_26M:
+        case ESP_IMAGE_SPI_SPEED_DIV_3:
             spi_clk_div = 3;
             break;
-        case ESP_IMAGE_SPI_SPEED_20M:
+        case ESP_IMAGE_SPI_SPEED_DIV_4:
             spi_clk_div = 4;
             break;
         default:
@@ -68,7 +69,7 @@ void IRAM_ATTR bootloader_flash_clock_config(const esp_image_header_t* pfhdr)
 void IRAM_ATTR bootloader_flash_gpio_config(const esp_image_header_t* pfhdr)
 {
     uint32_t drv = 2;
-    if (pfhdr->spi_speed == ESP_IMAGE_SPI_SPEED_80M) {
+    if (pfhdr->spi_speed == ESP_IMAGE_SPI_SPEED_DIV_1) {
         drv = 3;
     }
 
@@ -135,16 +136,16 @@ void IRAM_ATTR bootloader_flash_dummy_config(const esp_image_header_t* pfhdr)
     }
 
     switch (pfhdr->spi_speed) {
-        case ESP_IMAGE_SPI_SPEED_80M:
+        case ESP_IMAGE_SPI_SPEED_DIV_1:
             g_rom_spiflash_dummy_len_plus[0] = ESP_ROM_SPIFLASH_DUMMY_LEN_PLUS_80M;
             g_rom_spiflash_dummy_len_plus[1] = ESP_ROM_SPIFLASH_DUMMY_LEN_PLUS_80M;
             break;
-        case ESP_IMAGE_SPI_SPEED_40M:
+        case ESP_IMAGE_SPI_SPEED_DIV_2:
             g_rom_spiflash_dummy_len_plus[0] = ESP_ROM_SPIFLASH_DUMMY_LEN_PLUS_40M;
             g_rom_spiflash_dummy_len_plus[1] = ESP_ROM_SPIFLASH_DUMMY_LEN_PLUS_40M;
             break;
-        case ESP_IMAGE_SPI_SPEED_26M:
-        case ESP_IMAGE_SPI_SPEED_20M:
+        case ESP_IMAGE_SPI_SPEED_DIV_3:
+        case ESP_IMAGE_SPI_SPEED_DIV_4:
             g_rom_spiflash_dummy_len_plus[0] = ESP_ROM_SPIFLASH_DUMMY_LEN_PLUS_20M;
             g_rom_spiflash_dummy_len_plus[1] = ESP_ROM_SPIFLASH_DUMMY_LEN_PLUS_20M;
             break;
@@ -175,7 +176,7 @@ int bootloader_flash_get_wp_pin(void)
         return ESP32_D2WD_WP_GPIO;
     case EFUSE_RD_CHIP_VER_PKG_ESP32PICOD4:
         /* Same package IDs are used for ESP32-PICO-V3 and ESP32-PICO-D4, silicon version differentiates */
-        chip_ver = bootloader_common_get_chip_revision();
+        chip_ver = efuse_hal_get_major_chip_version();
         return (chip_ver < 3) ? ESP32_D2WD_WP_GPIO : ESP32_PICO_V3_GPIO;
     case EFUSE_RD_CHIP_VER_PKG_ESP32PICOV302:
         return ESP32_PICO_V3_GPIO;

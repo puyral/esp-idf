@@ -14,26 +14,24 @@
 
 #include <http_parser.h>
 #include "esp_tls_mbedtls.h"
+#include "esp_tls_private.h"
 #include "esp_tls_error_capture_internal.h"
 #include <errno.h>
 #include "esp_log.h"
+#include "esp_check.h"
 
 #ifdef CONFIG_MBEDTLS_CERTIFICATE_BUNDLE
 #include "esp_crt_bundle.h"
 #endif
 
 #ifdef CONFIG_ESP_TLS_USE_SECURE_ELEMENT
-
-#define ATECC608A_TNG_SLAVE_ADDR        0x6A
-#define ATECC608A_TFLEX_SLAVE_ADDR      0x6C
-#define ATECC608A_TCUSTOM_SLAVE_ADDR    0xC0
 /* cryptoauthlib includes */
 #include "mbedtls/atca_mbedtls_wrap.h"
 #include "tng_atca.h"
 #include "cryptoauthlib.h"
 static const atcacert_def_t *cert_def = NULL;
 /* Prototypes for functions */
-static esp_err_t esp_set_atecc608a_pki_context(esp_tls_t *tls, esp_tls_cfg_t *cfg);
+static esp_err_t esp_set_atecc608a_pki_context(esp_tls_t *tls, const void *pki);
 #endif /* CONFIG_ESP_TLS_USE_SECURE_ELEMENT */
 
 #if defined(CONFIG_ESP_TLS_USE_DS_PERIPHERAL)
@@ -115,11 +113,8 @@ esp_err_t esp_create_mbedtls_handle(const char *hostname, size_t hostlen, const 
 #endif
 
 #ifdef CONFIG_MBEDTLS_SSL_PROTO_TLS1_3
-    // NOTE: Mbed TLS currently supports only client-side config with TLS 1.3
-    if (tls->role != ESP_TLS_SERVER) {
-        mbedtls_ssl_conf_min_version(&tls->conf, MBEDTLS_SSL_MAJOR_VERSION_3, MBEDTLS_SSL_MINOR_VERSION_4);
-        mbedtls_ssl_conf_max_version(&tls->conf, MBEDTLS_SSL_MAJOR_VERSION_3, MBEDTLS_SSL_MINOR_VERSION_4);
-    }
+    mbedtls_ssl_conf_min_tls_version(&tls->conf, MBEDTLS_SSL_VERSION_TLS1_3);
+    mbedtls_ssl_conf_max_tls_version(&tls->conf, MBEDTLS_SSL_VERSION_TLS1_3);
 #endif
 
     if ((ret = mbedtls_ssl_setup(&tls->ssl, &tls->conf)) != 0) {
@@ -137,6 +132,15 @@ exit:
     esp_mbedtls_cleanup(tls);
     return esp_ret;
 
+}
+
+void *esp_mbedtls_get_ssl_context(esp_tls_t *tls)
+{
+    if (tls == NULL) {
+        ESP_LOGE(TAG, "Invalid arguments");
+        return NULL;
+    }
+    return (void*)&tls->ssl;
 }
 
 #ifdef CONFIG_ESP_TLS_CLIENT_SESSION_TICKETS
@@ -162,6 +166,14 @@ esp_tls_client_session_t *esp_mbedtls_get_client_session(esp_tls_t *tls)
     }
 
     return client_session;
+}
+
+void esp_mbedtls_free_client_session(esp_tls_client_session_t *client_session)
+{
+    if (client_session) {
+        mbedtls_ssl_session_free(&(client_session->saved_session));
+        free(client_session);
+    }
 }
 #endif /* CONFIG_ESP_TLS_CLIENT_SESSION_TICKETS */
 
@@ -258,8 +270,11 @@ void esp_mbedtls_conn_delete(esp_tls_t *tls)
     if (tls != NULL) {
         esp_mbedtls_cleanup(tls);
         if (tls->is_tls) {
-            mbedtls_net_free(&tls->server_fd);
-            tls->sockfd = tls->server_fd.fd;
+            if (tls->server_fd.fd != -1) {
+                mbedtls_net_free(&tls->server_fd);
+                /* Socket is already closed by `mbedtls_net_free` and hence also change assignment of its copy to an invalid value */
+                tls->sockfd = -1;
+            }
         }
     }
 }
@@ -509,10 +524,35 @@ esp_err_t set_server_config(esp_tls_cfg_server_t *cfg, esp_tls_t *tls)
             return esp_ret;
         }
     } else {
+#ifdef CONFIG_ESP_TLS_SERVER_MIN_AUTH_MODE_OPTIONAL
         mbedtls_ssl_conf_authmode(&tls->conf, MBEDTLS_SSL_VERIFY_OPTIONAL);
+#else
+        mbedtls_ssl_conf_authmode(&tls->conf, MBEDTLS_SSL_VERIFY_NONE);
+#endif
     }
 
-    if (cfg->servercert_buf != NULL && cfg->serverkey_buf != NULL) {
+    if (cfg->use_secure_element) {
+#ifdef CONFIG_ESP_TLS_USE_SECURE_ELEMENT
+        esp_tls_pki_t pki = {
+            .public_cert = &tls->servercert,
+            .pk_key = &tls->serverkey,
+            .publiccert_pem_buf = cfg->servercert_buf,
+            .publiccert_pem_bytes = cfg->servercert_bytes,
+            .privkey_pem_buf = NULL,
+            .privkey_pem_bytes = 0,
+            .privkey_password = NULL,
+            .privkey_password_len = 0,
+        };
+
+        ret = esp_set_atecc608a_pki_context(tls, (void*) &pki);
+        if (ret != ESP_OK) {
+            return ret;
+        }
+#else
+        ESP_LOGE(TAG, "Please enable secure element support for ESP-TLS in menuconfig");
+        return ESP_FAIL;
+#endif /* CONFIG_ESP_TLS_USE_SECURE_ELEMENT */
+    } else if (cfg->servercert_buf != NULL && cfg->serverkey_buf != NULL) {
         esp_tls_pki_t pki = {
             .public_cert = &tls->servercert,
             .pk_key = &tls->serverkey,
@@ -662,7 +702,17 @@ esp_err_t set_client_config(const char *hostname, size_t hostlen, esp_tls_cfg_t 
 
     if (cfg->use_secure_element) {
 #ifdef CONFIG_ESP_TLS_USE_SECURE_ELEMENT
-        ret = esp_set_atecc608a_pki_context(tls, (esp_tls_cfg_t *)cfg);
+        esp_tls_pki_t pki = {
+            .public_cert = &tls->clientcert,
+            .pk_key = &tls->clientkey,
+            .publiccert_pem_buf = cfg->clientcert_buf,
+            .publiccert_pem_bytes = cfg->clientcert_bytes,
+            .privkey_pem_buf = NULL,
+            .privkey_pem_bytes = 0,
+            .privkey_password = NULL,
+            .privkey_password_len = 0,
+        };
+        ret = esp_set_atecc608a_pki_context(tls, (void*) &pki);
         if (ret != ESP_OK) {
             return ret;
         }
@@ -837,7 +887,7 @@ static esp_err_t esp_init_atecc608a(uint8_t i2c_addr)
     return ESP_OK;
 }
 
-static esp_err_t esp_set_atecc608a_pki_context(esp_tls_t *tls, esp_tls_cfg_t *cfg)
+static esp_err_t esp_set_atecc608a_pki_context(esp_tls_t *tls, const void *pki)
 {
     int ret = 0;
     esp_err_t esp_ret = ESP_FAIL;
@@ -846,12 +896,12 @@ static esp_err_t esp_set_atecc608a_pki_context(esp_tls_t *tls, esp_tls_cfg_t *cf
     (void)cert_def;
 #if defined(CONFIG_ATECC608A_TNG) || defined(CONFIG_ATECC608A_TFLEX)
 #ifdef CONFIG_ATECC608A_TNG
-    esp_ret = esp_init_atecc608a(ATECC608A_TNG_SLAVE_ADDR);
+    esp_ret = esp_init_atecc608a(CONFIG_ATCA_I2C_ADDRESS);
     if (ret != ESP_OK) {
         return ESP_ERR_ESP_TLS_SE_FAILED;
     }
 #elif CONFIG_ATECC608A_TFLEX /* CONFIG_ATECC608A_TNG */
-    esp_ret = esp_init_atecc608a(ATECC608A_TFLEX_SLAVE_ADDR);
+    esp_ret = esp_init_atecc608a(CONFIG_ATCA_I2C_ADDRESS);
     if (ret != ESP_OK) {
         return ESP_ERR_ESP_TLS_SE_FAILED;
     }
@@ -871,14 +921,14 @@ static esp_err_t esp_set_atecc608a_pki_context(esp_tls_t *tls, esp_tls_cfg_t *cf
         return ESP_ERR_ESP_TLS_SE_FAILED;
     }
 #elif CONFIG_ATECC608A_TCUSTOM
-    esp_ret = esp_init_atecc608a(ATECC608A_TCUSTOM_SLAVE_ADDR);
+    esp_ret = esp_init_atecc608a(CONFIG_ATCA_I2C_ADDRESS);
     if (ret != ESP_OK) {
         return ESP_ERR_ESP_TLS_SE_FAILED;
     }
     mbedtls_x509_crt_init(&tls->clientcert);
 
     if(cfg->clientcert_buf != NULL) {
-        ret = mbedtls_x509_crt_parse(&tls->clientcert, (const unsigned char*)cfg->clientcert_buf, cfg->clientcert_bytes);
+        ret = mbedtls_x509_crt_parse(&tls->clientcert, (const unsigned char*)((esp_tls_pki_t *)pki->publiccert_pem_buf), (esp_tls_pki_t *)pki->publiccert_pem_bytes);
         if (ret < 0) {
             ESP_LOGE(TAG, "mbedtls_x509_crt_parse returned -0x%04X", -ret);
             mbedtls_print_error_msg(ret);
@@ -905,6 +955,7 @@ static esp_err_t esp_set_atecc608a_pki_context(esp_tls_t *tls, esp_tls_cfg_t *cf
         ESP_INT_EVENT_TRACKER_CAPTURE(tls->error_handle, ESP_TLS_ERR_TYPE_MBEDTLS, -ret);
         return ESP_ERR_ESP_TLS_SE_FAILED;
     }
+
     return ESP_OK;
 }
 #endif /* CONFIG_ESP_TLS_USE_SECURE_ELEMENT */
@@ -920,14 +971,17 @@ static esp_err_t esp_mbedtls_init_pk_ctx_for_ds(const void *pki)
                                         esp_ds_get_keylen )) != 0) {
         ESP_LOGE(TAG, "Error in mbedtls_pk_setup_rsa_alt, returned -0x%04X", -ret);
         mbedtls_print_error_msg(ret);
-        return ESP_FAIL;
+        ret = ESP_FAIL;
+        goto exit;
     }
     ret = esp_ds_init_data_ctx(((const esp_tls_pki_t*)pki)->esp_ds_data);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to initialize DS parameters from nvs");
-        return ESP_FAIL;
+        goto exit;
     }
     ESP_LOGD(TAG, "DS peripheral params initialized.");
-    return ESP_OK;
+exit:
+    mbedtls_rsa_free(&rsakey);
+    return ret;
 }
 #endif /* CONFIG_ESP_TLS_USE_DS_PERIPHERAL */

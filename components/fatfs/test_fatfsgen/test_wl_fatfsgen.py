@@ -11,7 +11,7 @@ from test_utils import CFG, generate_test_dir_1, generate_test_dir_2
 
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 import wl_fatfsgen  # noqa E402  # pylint: disable=C0413
-from fatfsgen_utils.exceptions import WLNotInitialized  # noqa E402  # pylint: disable=C0413
+from fatfs_utils.exceptions import WLNotInitialized  # noqa E402  # pylint: disable=C0413
 
 
 class WLFatFSGen(unittest.TestCase):
@@ -105,9 +105,6 @@ class WLFatFSGen(unittest.TestCase):
         fatfs.wl_create_directory('TESTFOLD')
         self.assertRaises(WLNotInitialized, fatfs.wl_write_filesystem, CFG['output_file'])
 
-    def test_wrong_sector_size(self) -> None:
-        self.assertRaises(NotImplementedError, wl_fatfsgen.WLFATFS, sector_size=1024)
-
     def test_e2e_deep_folder_into_image_ext(self) -> None:
         fatfs = wl_fatfsgen.WLFATFS()
         fatfs.wl_generate(CFG['test_dir2'])
@@ -134,7 +131,7 @@ class WLFatFSGen(unittest.TestCase):
             file_system = bytearray(fs_file.read())
 
         self.assertEqual(file_system[0x7060:0x7070], b'TESTFIL2    \x00\x00\x00\x00')
-        self.assertEqual(file_system[0x7070:0x7080], b'!\x00\x00\x00\x00\x00\x00\x00\x21\x00\x05\x00\x0b\x00\x00\x00')
+        self.assertEqual(file_system[0x7070:0x7080], b'!\x00!\x00\x00\x00\x00\x00!\x00\x05\x00\x0b\x00\x00\x00')
         self.assertEqual(file_system[0x8040:0x8050], b'LASTFILE    \x00\x00\x00\x00')
         self.assertEqual(file_system[0x9000:0x9010], b'deeptest\n\x00\x00\x00\x00\x00\x00\x00')
         self.assertEqual(file_system[0xa000:0xa010], b'thisistest\n\x00\x00\x00\x00\x00')

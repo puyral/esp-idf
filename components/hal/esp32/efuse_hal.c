@@ -12,8 +12,7 @@
 #include "hal/efuse_hal.h"
 #include "soc/syscon_reg.h"
 
-
-uint32_t efuse_hal_get_chip_revision(void)
+uint32_t efuse_hal_get_major_chip_version(void)
 {
     uint8_t eco_bit0 = efuse_ll_get_chip_ver_rev1();
     uint8_t eco_bit1 = efuse_ll_get_chip_ver_rev2();
@@ -43,6 +42,11 @@ uint32_t efuse_hal_get_chip_revision(void)
         break;
     }
     return chip_ver;
+}
+
+uint32_t efuse_hal_get_minor_chip_version(void)
+{
+    return efuse_ll_get_chip_wafer_version_minor();
 }
 
 uint32_t efuse_hal_get_rated_freq_mhz(void)
@@ -88,7 +92,18 @@ void efuse_hal_read(void)
 
 void efuse_hal_clear_program_registers(void)
 {
-    efuse_ll_set_conf_read_op_code();
+    for (uint32_t r = EFUSE_BLK0_WDATA0_REG; r <= EFUSE_BLK0_WDATA6_REG; r += 4) {
+        REG_WRITE(r, 0);
+    }
+    for (uint32_t r = EFUSE_BLK1_WDATA0_REG; r <= EFUSE_BLK1_WDATA7_REG; r += 4) {
+        REG_WRITE(r, 0);
+    }
+    for (uint32_t r = EFUSE_BLK2_WDATA0_REG; r <= EFUSE_BLK2_WDATA7_REG; r += 4) {
+        REG_WRITE(r, 0);
+    }
+    for (uint32_t r = EFUSE_BLK3_WDATA0_REG; r <= EFUSE_BLK3_WDATA7_REG; r += 4) {
+        REG_WRITE(r, 0);
+    }
 }
 
 void efuse_hal_program(uint32_t block)
@@ -103,3 +118,10 @@ void efuse_hal_program(uint32_t block)
 }
 
 /******************* eFuse control functions *************************/
+
+bool efuse_hal_is_coding_error_in_block(unsigned block)
+{
+    return block > 0 &&
+           efuse_ll_get_coding_scheme() == 1 && // 3/4 coding scheme
+           efuse_ll_get_dec_warnings(block);
+}

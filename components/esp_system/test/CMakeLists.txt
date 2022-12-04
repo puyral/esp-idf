@@ -1,6 +1,7 @@
 set(requires "unity"
              "test_utils"
-             "driver")
+             "driver"
+             "esp_timer")
 
 set(excludes "test_ipc_isr.c"
              "test_ipc_isr.S"
@@ -18,3 +19,4 @@ idf_component_register(SRC_DIRS .
                     EXCLUDE_SRCS "${excludes}"
                     PRIV_INCLUDE_DIRS .
                     PRIV_REQUIRES "${requires}")
+target_compile_options(${COMPONENT_LIB} PRIVATE "-Wno-format")

@@ -6,6 +6,7 @@
 #include "unity.h"
 #include "esp_pm.h"
 #include "esp_sleep.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/semphr.h"
@@ -17,6 +18,7 @@
 #include "soc/rtc_periph.h"
 #include "esp_rom_sys.h"
 #include "esp_private/esp_clk.h"
+#include "test_utils.h"
 
 #include "sdkconfig.h"
 
@@ -39,20 +41,22 @@ TEST_CASE("Can dump power management lock stats", "[pm]")
 
 static void switch_freq(int mhz)
 {
-    int xtal_freq = rtc_clk_xtal_freq_get();
+    int xtal_freq_mhz = esp_clk_xtal_freq() / MHZ;
 #if CONFIG_IDF_TARGET_ESP32
     esp_pm_config_esp32_t pm_config = {
 #elif CONFIG_IDF_TARGET_ESP32S2
     esp_pm_config_esp32s2_t pm_config = {
 #elif CONFIG_IDF_TARGET_ESP32S3
     esp_pm_config_esp32s3_t pm_config = {
+#elif CONFIG_IDF_TARGET_ESP32C2
+    esp_pm_config_esp32c2_t pm_config = {
 #elif CONFIG_IDF_TARGET_ESP32C3
     esp_pm_config_esp32c3_t pm_config = {
 #elif CONFIG_IDF_TARGET_ESP32H2
     esp_pm_config_esp32h2_t pm_config = {
 #endif
         .max_freq_mhz = mhz,
-        .min_freq_mhz = MIN(mhz, xtal_freq),
+        .min_freq_mhz = MIN(mhz, xtal_freq_mhz),
     };
     ESP_ERROR_CHECK( esp_pm_configure(&pm_config) );
     printf("Waiting for frequency to be set to %d MHz...\n", mhz);
@@ -63,8 +67,13 @@ static void switch_freq(int mhz)
     }
 }
 
-#if CONFIG_IDF_TARGET_ESP32C3 || CONFIG_IDF_TARGET_ESP32H2
-static const int test_freqs[] = {40, 160, 80, 40, 80, 10, 80, 20, 40};
+#if CONFIG_IDF_TARGET_ESP32C3
+static const int test_freqs[] = {40, CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ, 80, 40, 80, 10, 80, 20, 40};
+#elif CONFIG_IDF_TARGET_ESP32C2
+static const int test_freqs[] = {CONFIG_XTAL_FREQ, CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ, 80, CONFIG_XTAL_FREQ, 80,
+                                 CONFIG_XTAL_FREQ / 2, CONFIG_XTAL_FREQ}; // C2 xtal has 40/26MHz option
+#elif CONFIG_IDF_TARGET_ESP32H2
+static const int test_freqs[] = {32, CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ, 32} // TODO: IDF-3786
 #else
 static const int test_freqs[] = {240, 40, 160, 240, 80, 40, 240, 40, 80, 10, 80, 20, 40};
 #endif
@@ -86,7 +95,7 @@ TEST_CASE("Can switch frequency using esp_pm_configure", "[pm]")
 static void light_sleep_enable(void)
 {
     int cur_freq_mhz = esp_clk_cpu_freq() / MHZ;
-    int xtal_freq = (int) rtc_clk_xtal_freq_get();
+    int xtal_freq = esp_clk_xtal_freq() / MHZ;
 
 #if CONFIG_IDF_TARGET_ESP32
     esp_pm_config_esp32_t pm_config = {
@@ -94,6 +103,8 @@ static void light_sleep_enable(void)
     esp_pm_config_esp32s2_t pm_config = {
 #elif CONFIG_IDF_TARGET_ESP32S3
     esp_pm_config_esp32s3_t pm_config = {
+#elif CONFIG_IDF_TARGET_ESP32C2
+    esp_pm_config_esp32c2_t pm_config = {
 #elif CONFIG_IDF_TARGET_ESP32C3
     esp_pm_config_esp32c3_t pm_config = {
 #elif CONFIG_IDF_TARGET_ESP32H2
@@ -116,6 +127,8 @@ static void light_sleep_disable(void)
     esp_pm_config_esp32s2_t pm_config = {
 #elif CONFIG_IDF_TARGET_ESP32S3
     esp_pm_config_esp32s3_t pm_config = {
+#elif CONFIG_IDF_TARGET_ESP32C2
+    esp_pm_config_esp32c2_t pm_config = {
 #elif CONFIG_IDF_TARGET_ESP32C3
     esp_pm_config_esp32c3_t pm_config = {
 #elif CONFIG_IDF_TARGET_ESP32H2
@@ -134,18 +147,21 @@ TEST_CASE("Automatic light occurs when tasks are suspended", "[pm]")
      * It will stop working while in light sleep.
      */
     gptimer_config_t config = {
-        .clk_src = GPTIMER_CLK_SRC_APB,
+        .clk_src = GPTIMER_CLK_SRC_DEFAULT,
         .direction = GPTIMER_COUNT_UP,
         .resolution_hz = 1000000, /* 1 us per tick */
     };
     TEST_ESP_OK(gptimer_new_timer(&config, &gptimer));
+    TEST_ESP_OK(gptimer_enable(gptimer));
     TEST_ESP_OK(gptimer_start(gptimer));
     // if GPTimer is clocked from APB, when PM is enabled, the driver will acquire the PM lock
     // causing the auto light sleep doesn't take effect
     // so we manually release the lock here
     esp_pm_lock_handle_t gptimer_pm_lock;
     TEST_ESP_OK(gptimer_get_pm_lock(gptimer, &gptimer_pm_lock));
-    TEST_ESP_OK(esp_pm_lock_release(gptimer_pm_lock));
+    if (gptimer_pm_lock) {
+        TEST_ESP_OK(esp_pm_lock_release(gptimer_pm_lock));
+    }
 
     light_sleep_enable();
 
@@ -171,15 +187,16 @@ TEST_CASE("Automatic light occurs when tasks are suspended", "[pm]")
     }
 
     light_sleep_disable();
-    TEST_ESP_OK(esp_pm_lock_acquire(gptimer_pm_lock));
+    if (gptimer_pm_lock) {
+        TEST_ESP_OK(esp_pm_lock_acquire(gptimer_pm_lock));
+    }
     TEST_ESP_OK(gptimer_stop(gptimer));
+    TEST_ESP_OK(gptimer_disable(gptimer));
     TEST_ESP_OK(gptimer_del_timer(gptimer));
 }
 
 #if CONFIG_ULP_COPROC_TYPE_FSM
 #if !TEMPORARY_DISABLED_FOR_TARGETS(ESP32S2, ESP32S3)
-#if !DISABLED_FOR_TARGETS(ESP32C3)
-// No ULP on C3
 
 // Fix failure on ESP32 when running alone; passes when the previous test is run before this one
 TEST_CASE("Can wake up from automatic light sleep by GPIO", "[pm][ignore]")
@@ -248,10 +265,11 @@ TEST_CASE("Can wake up from automatic light sleep by GPIO", "[pm][ignore]")
 
     light_sleep_disable();
 }
-#endif //!DISABLED_FOR_TARGETS(ESP32C3)
 #endif //!TEMPORARY_DISABLED_FOR_TARGETS(ESP32S2, ESP32S3)
 #endif //CONFIG_ULP_COPROC_TYPE_FSM
 
+#if !TEMPORARY_DISABLED_FOR_TARGETS(ESP32C2)
+//IDF-5053
 typedef struct {
     int delay_us;
     int result;
@@ -372,6 +390,7 @@ TEST_CASE("esp_timer produces correct delays with light sleep", "[pm]")
 
 #undef NUM_INTERVALS
 }
+#endif //!TEMPORARY_DISABLED_FOR_TARGETS(ESP32C2)
 
 static void timer_cb1(void *arg)
 {

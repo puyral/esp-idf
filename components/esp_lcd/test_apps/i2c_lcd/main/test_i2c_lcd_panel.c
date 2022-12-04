@@ -14,10 +14,6 @@
 #include "esp_system.h"
 #include "test_i2c_board.h"
 
-void test_app_include_i2c_lcd(void)
-{
-}
-
 TEST_CASE("lcd_panel_with_i2c_interface_(ssd1306)", "[lcd]")
 {
     const uint8_t pattern[][16] = {{
@@ -54,12 +50,13 @@ TEST_CASE("lcd_panel_with_i2c_interface_(ssd1306)", "[lcd]")
     esp_lcd_panel_handle_t panel_handle = NULL;
     esp_lcd_panel_dev_config_t panel_config = {
         .bits_per_pixel = 1,
-        .color_space = ESP_LCD_COLOR_SPACE_MONOCHROME,
         .reset_gpio_num = -1,
     };
     TEST_ESP_OK(esp_lcd_new_panel_ssd1306(io_handle, &panel_config, &panel_handle));
     TEST_ESP_OK(esp_lcd_panel_reset(panel_handle));
     TEST_ESP_OK(esp_lcd_panel_init(panel_handle));
+    // turn on display
+    TEST_ESP_OK(esp_lcd_panel_disp_on_off(panel_handle, true));
 
     for (int i = 0; i < TEST_LCD_H_RES / 16; i++) {
         for (int j = 0; j < TEST_LCD_V_RES / 8; j++) {

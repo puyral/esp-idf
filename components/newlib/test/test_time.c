@@ -1,8 +1,12 @@
+/*
+ * SPDX-FileCopyrightText: 2015-2021 Espressif Systems (Shanghai) CO LTD
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
 #include <stdio.h>
 #include <string.h>
 #include <math.h>
 #include "unity.h"
-#include "driver/adc.h"
 #include <time.h>
 #include <sys/time.h>
 #include "freertos/FreeRTOS.h"
@@ -26,21 +30,16 @@
 
 #if CONFIG_IDF_TARGET_ESP32
 #include "esp32/rtc.h"
-#define TARGET_DEFAULT_CPU_FREQ_MHZ CONFIG_ESP32_DEFAULT_CPU_FREQ_MHZ
 #elif CONFIG_IDF_TARGET_ESP32S2
 #include "esp32s2/rtc.h"
-#define TARGET_DEFAULT_CPU_FREQ_MHZ CONFIG_ESP32S2_DEFAULT_CPU_FREQ_MHZ
 #elif CONFIG_IDF_TARGET_ESP32S3
 #include "esp32s3/rtc.h"
-#define TARGET_DEFAULT_CPU_FREQ_MHZ CONFIG_ESP32S3_DEFAULT_CPU_FREQ_MHZ
 #elif CONFIG_IDF_TARGET_ESP32C3
 #include "esp32c3/rtc.h"
-#define TARGET_DEFAULT_CPU_FREQ_MHZ CONFIG_ESP32C3_DEFAULT_CPU_FREQ_MHZ
 #elif CONFIG_IDF_TARGET_ESP32H2
 #include "esp32h2/rtc.h"
-#define TARGET_DEFAULT_CPU_FREQ_MHZ CONFIG_ESP32H2_DEFAULT_CPU_FREQ_MHZ
 #elif CONFIG_IDF_TARGET_ESP32C2
-#define TARGET_DEFAULT_CPU_FREQ_MHZ CONFIG_ESP32C2_DEFAULT_CPU_FREQ_MHZ
+#include "esp32c2/rtc.h"
 #endif
 
 #if portNUM_PROCESSORS == 2
@@ -51,7 +50,7 @@ static void time_adc_test_task(void* arg)
     for (int i = 0; i < 200000; ++i) {
         // wait for 20us, reading one of RTC registers
         uint32_t ccount = xthal_get_ccount();
-        while (xthal_get_ccount() - ccount < 20 * TARGET_DEFAULT_CPU_FREQ_MHZ) {
+        while (xthal_get_ccount() - ccount < 20 * CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ) {
             volatile uint32_t val = REG_READ(RTC_CNTL_STATE0_REG);
             (void) val;
         }
@@ -363,7 +362,7 @@ void test_posix_timers_clock (void)
     printf("CONFIG_ESP_TIME_FUNCS_USE_RTC_TIMER    ");
 #endif
 
-#ifdef CONFIG_ESP32_RTC_CLK_SRC_EXT_CRYS
+#ifdef CONFIG_RTC_CLK_SRC_EXT_CRYS
     printf("External (crystal) Frequency = %d Hz\n", rtc_clk_slow_freq_get_hz());
 #else
     printf("Internal Frequency = %d Hz\n", rtc_clk_slow_freq_get_hz());
@@ -455,7 +454,9 @@ static struct timeval get_time(const char *desc, char *buffer)
     gettimeofday(&timestamp, NULL);
     struct tm* tm_info = localtime(&timestamp.tv_sec);
     strftime(buffer, 32, "%c", tm_info);
+#if !CONFIG_NEWLIB_NANO_FORMAT
     ESP_LOGI("TAG", "%s: %016llX (%s)", desc, timestamp.tv_sec, buffer);
+#endif
     return timestamp;
 }
 
@@ -467,7 +468,9 @@ TEST_CASE("test time_t wide 64 bits", "[newlib]")
 
     struct tm tm = {4, 14, 3, 19, 0, 138, 0, 0, 0};
     struct timeval timestamp = { mktime(&tm), 0 };
+#if !CONFIG_NEWLIB_NANO_FORMAT
     ESP_LOGI("TAG", "timestamp: %016llX", timestamp.tv_sec);
+#endif
     settimeofday(&timestamp, NULL);
     get_time("Set time", buffer);
 
@@ -499,7 +502,9 @@ TEST_CASE("test time functions wide 64 bits", "[newlib]")
         localtime_r(&now, &timeinfo);
 
         time_t t = mktime(&timeinfo);
+#if !CONFIG_NEWLIB_NANO_FORMAT
         ESP_LOGI("TAG", "Test mktime(). Time: %016llX", t);
+#endif
         TEST_ASSERT_EQUAL(timestamp.tv_sec, t);
         // mktime() has error in newlib-3.0.0. It fixed in newlib-3.0.0.20180720
         TEST_ASSERT_EQUAL((timestamp.tv_sec >> 32), (t >> 32));
@@ -536,9 +541,13 @@ TEST_CASE("test time functions wide 64 bits", "[newlib]")
 #endif // !_USE_LONG_TIME_T
 
 #if defined( CONFIG_ESP_TIME_FUNCS_USE_ESP_TIMER ) && defined( CONFIG_ESP_TIME_FUNCS_USE_RTC_TIMER )
+#if !TEMPORARY_DISABLED_FOR_TARGETS(ESP32C2)
+//IDF-5057
 
 extern int64_t s_microseconds_offset;
 static const uint64_t s_start_timestamp  = 1606838354;
+
+
 static RTC_NOINIT_ATTR uint64_t s_saved_time;
 static RTC_NOINIT_ATTR uint64_t s_time_in_reboot;
 
@@ -621,14 +630,16 @@ static void check_time(void)
     int latency_before_run_ut = 1 + (esp_rtc_get_time_us() - s_time_in_reboot) / 1000000;
     struct timeval tv;
     gettimeofday(&tv, NULL);
-    printf("timestamp %ld (s)\n", tv.tv_sec);
+    printf("timestamp %jd (s)\n", (intmax_t)tv.tv_sec);
     int dt = tv.tv_sec - s_saved_time;
     printf("delta timestamp = %d (s)\n", dt);
     TEST_ASSERT_GREATER_OR_EQUAL(0, dt);
     TEST_ASSERT_LESS_OR_EQUAL(latency_before_run_ut, dt);
 }
 
+
 TEST_CASE_MULTIPLE_STAGES("Timestamp after abort is correct in case RTC & High-res timer have + big error", "[newlib][reset=abort,SW_CPU_RESET]", set_timestamp1, check_time);
 TEST_CASE_MULTIPLE_STAGES("Timestamp after restart is correct in case RTC & High-res timer have + big error", "[newlib][reset=SW_CPU_RESET]", set_timestamp2, check_time);
 TEST_CASE_MULTIPLE_STAGES("Timestamp after restart is correct in case RTC & High-res timer have - big error", "[newlib][reset=SW_CPU_RESET]", set_timestamp3, check_time);
+#endif //!TEMPORARY_DISABLED_FOR_TARGETS(ESP32C2)
 #endif // CONFIG_ESP_TIME_FUNCS_USE_ESP_TIMER && CONFIG_ESP_TIME_FUNCS_USE_RTC_TIMER

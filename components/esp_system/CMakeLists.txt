@@ -26,26 +26,21 @@ else()
             "xt_wdt.c"
             "debug_stubs.c")
 
-    if(NOT (${target} STREQUAL "esp32c2"))
-        list(APPEND srcs "debug_stubs.c")
-    endif()
-
     if(CONFIG_ESP_SYSTEM_USE_EH_FRAME)
         list(APPEND srcs "eh_frame_parser.c")
     endif()
 
     idf_component_register(SRCS "${srcs}"
                         INCLUDE_DIRS include
-                        PRIV_REQUIRES spi_flash
+                        PRIV_REQUIRES spi_flash esp_timer
                                     # [refactor-todo] requirements due to init code,
                                     # should be removable once using component init functions
                                     # link-time registration is used.
-                                    esp_pm app_update nvs_flash pthread
                                     # [refactor-todo] requires "driver" for headers:
-                                    # - periph_ctrl.h
-                                    # - rtc_cntl.h
                                     # - spi_common_internal.h
-                                    esp_phy efuse driver
+                                    # [refactor-todo] esp_partition required for virtual efuse
+                                    # init code. Move to esp_efuse component.
+                                    pthread bootloader_support efuse driver esp_partition
                         LDFRAGMENTS "linker.lf" "app.lf")
     add_subdirectory(port)
 
@@ -90,6 +85,26 @@ endif()
 
 # [refactor-todo] requirement from the panic handler,
 # need to introduce panic "event" concept to remove this dependency (IDF-2194)
-if(CONFIG_ESP_SYSTEM_PANIC_GDBSTUB)
-    idf_component_optional_requires(PRIVATE esp_gdbstub)
+idf_component_optional_requires(PRIVATE esp_gdbstub)
+
+idf_component_optional_requires(PRIVATE esp_app_format)
+
+if(CONFIG_PM_ENABLE)
+    idf_component_optional_requires(PRIVATE pm)
 endif()
+
+if(CONFIG_VFS_SUPPORT_IO)
+    idf_component_optional_requires(PRIVATE vfs)
+endif()
+
+if(CONFIG_SW_COEXIST_ENABLE OR CONFIG_EXTERNAL_COEX_ENABLE)
+    idf_component_optional_requires(PRIVATE esp_wifi)
+endif()
+
+if(NOT BOOTLOADER_BUILD)
+    if(CONFIG_SPIRAM)
+        idf_component_optional_requires(PRIVATE esp_psram)
+    endif()
+endif()
+
+target_compile_options(${COMPONENT_LIB} PRIVATE "-Wno-format")

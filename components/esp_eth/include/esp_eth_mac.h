@@ -8,6 +8,9 @@
 #include <stdbool.h>
 #include "esp_eth_com.h"
 #include "sdkconfig.h"
+#if CONFIG_ETH_USE_SPI_ETHERNET
+#include "driver/spi_master.h"
+#endif
 
 #ifdef __cplusplus
 extern "C" {
@@ -95,12 +98,33 @@ struct esp_eth_mac_s {
     *
     * @return
     *      - ESP_OK: transmit packet successfully
-    *      - ESP_ERR_INVALID_ARG: transmit packet failed because of invalid argument
-    *      - ESP_ERR_INVALID_STATE: transmit packet failed because of wrong state of MAC
+    *      - ESP_ERR_INVALID_SIZE: number of actually sent bytes differs to expected
     *      - ESP_FAIL: transmit packet failed because some other error occurred
+    *
+    * @note Returned error codes may differ for each specific MAC chip.
     *
     */
     esp_err_t (*transmit)(esp_eth_mac_t *mac, uint8_t *buf, uint32_t length);
+
+    /**
+    * @brief Transmit packet from Ethernet MAC constructed with special parameters at Layer2.
+    *
+    * @param[in] mac: Ethernet MAC instance
+    * @param[in] argc: number variable arguments
+    * @param[in] args: variable arguments
+    *
+    * @note Typical intended use case is to make possible to construct a frame from multiple higher layer
+    *       buffers without a need of buffer reallocations. However, other use cases are not limited.
+    *
+    * @return
+    *      - ESP_OK: transmit packet successfully
+    *      - ESP_ERR_INVALID_SIZE: number of actually sent bytes differs to expected
+    *      - ESP_FAIL: transmit packet failed because some other error occurred
+    *
+    * @note Returned error codes may differ for each specific MAC chip.
+    *
+    */
+    esp_err_t (*transmit_vargs)(esp_eth_mac_t *mac, uint32_t argc, va_list args);
 
     /**
     * @brief Receive packet from Ethernet MAC
@@ -267,6 +291,23 @@ struct esp_eth_mac_s {
     esp_err_t (*set_peer_pause_ability)(esp_eth_mac_t *mac, uint32_t ability);
 
     /**
+    * @brief Custom IO function of MAC driver. This function is intended to extend common options of esp_eth_ioctl to cover specifics of MAC chip.
+    *
+    * @note This function may not be assigned when the MAC chip supports only most common set of configuration options.
+    *
+    * @param[in] mac: Ethernet MAC instance
+    * @param[in] cmd: IO control command
+    * @param[in, out] data: address of data for `set` command or address where to store the data when used with `get` command
+    *
+    * @return
+    *       - ESP_OK: process io command successfully
+    *       - ESP_ERR_INVALID_ARG: process io command failed because of some invalid argument
+    *       - ESP_FAIL: process io command failed because some other error occurred
+    *       - ESP_ERR_NOT_SUPPORTED: requested feature is not supported
+    */
+    esp_err_t (*custom_ioctl)(esp_eth_mac_t *mac, uint32_t cmd, void *data);
+
+    /**
     * @brief Free memory of Ethernet MAC
     *
     * @param[in] mac: Ethernet MAC instance
@@ -357,7 +398,6 @@ typedef union {
     } rmii; /*!< EMAC RMII Clock Configuration */
 } eth_mac_clock_config_t;
 
-
 /**
 * @brief Configuration of Ethernet MAC object
 *
@@ -420,7 +460,8 @@ typedef struct {
 /**
 * @brief Create ESP32 Ethernet MAC instance
 *
-* @param config: Ethernet MAC configuration
+* @param esp32_config: EMAC specific configuration
+* @param config:       Ethernet MAC configuration
 *
 * @return
 *      - instance: create MAC instance successfully
@@ -435,18 +476,20 @@ esp_eth_mac_t *esp_eth_mac_new_esp32(const eth_esp32_emac_config_t *esp32_config
  *
  */
 typedef struct {
-    void *spi_hdl;     /*!< Handle of SPI device driver */
-    int int_gpio_num;  /*!< Interrupt GPIO number */
+    spi_host_device_t spi_host_id;              /*!< SPI peripheral */
+    spi_device_interface_config_t *spi_devcfg;  /*!< SPI device configuration */
+    int int_gpio_num;                           /*!< Interrupt GPIO number */
 } eth_dm9051_config_t;
 
 /**
  * @brief Default DM9051 specific configuration
  *
  */
-#define ETH_DM9051_DEFAULT_CONFIG(spi_device) \
-    {                                         \
-        .spi_hdl = spi_device,                \
-        .int_gpio_num = 4,                    \
+#define ETH_DM9051_DEFAULT_CONFIG(spi_host, spi_devcfg_p) \
+    {                                           \
+        .spi_host_id = spi_host,                \
+        .spi_devcfg = spi_devcfg_p,             \
+        .int_gpio_num = 4,                      \
     }
 
 /**
@@ -468,18 +511,20 @@ esp_eth_mac_t *esp_eth_mac_new_dm9051(const eth_dm9051_config_t *dm9051_config, 
  *
  */
 typedef struct {
-    void *spi_hdl;     /*!< Handle of SPI device driver */
-    int int_gpio_num;  /*!< Interrupt GPIO number */
+    spi_host_device_t spi_host_id;              /*!< SPI peripheral */
+    spi_device_interface_config_t *spi_devcfg;  /*!< SPI device configuration */
+    int int_gpio_num;                           /*!< Interrupt GPIO number */
 } eth_w5500_config_t;
 
 /**
  * @brief Default W5500 specific configuration
  *
  */
-#define ETH_W5500_DEFAULT_CONFIG(spi_device) \
-    {                                        \
-        .spi_hdl = spi_device,               \
-        .int_gpio_num = 4,                   \
+#define ETH_W5500_DEFAULT_CONFIG(spi_host, spi_devcfg_p) \
+    {                                          \
+        .spi_host_id = spi_host,               \
+        .spi_devcfg = spi_devcfg_p,            \
+        .int_gpio_num = 4,                     \
     }
 
 /**
@@ -501,18 +546,20 @@ esp_eth_mac_t *esp_eth_mac_new_w5500(const eth_w5500_config_t *w5500_config, con
  *
  */
 typedef struct {
-    void *spi_hdl;     /*!< Handle of SPI device driver */
-    int int_gpio_num;  /*!< Interrupt GPIO number */
+    spi_host_device_t spi_host_id;              /*!< SPI peripheral */
+    spi_device_interface_config_t *spi_devcfg;  /*!< SPI device configuration */
+    int int_gpio_num;                           /*!< Interrupt GPIO number */
 } eth_ksz8851snl_config_t;
 
 /**
  * @brief Default KSZ8851SNL specific configuration
  *
  */
-#define ETH_KSZ8851SNL_DEFAULT_CONFIG(spi_device) \
-    {                                        \
-        .spi_hdl = spi_device,               \
-        .int_gpio_num = 14,                   \
+#define ETH_KSZ8851SNL_DEFAULT_CONFIG(spi_host, spi_devcfg_p) \
+    {                                               \
+        .spi_host_id = spi_host,                    \
+        .spi_devcfg = spi_devcfg_p,                 \
+        .int_gpio_num = 14,                         \
     }
 
 /**

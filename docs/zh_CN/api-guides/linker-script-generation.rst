@@ -7,13 +7,14 @@
 
 {IDF_TARGET_NAME} 中有多个用于存放代码和数据的 :ref:`内存区域<memory-layout>` 。代码和只读数据默认存放在 flash 中，可写数据存放在 RAM 中。不过有时，用户必须更改默认存放区域。
 
-.. only:: SOC_ULP_SUPPORTED
+例如：
 
-    例如为了提高性能，将关键代码存放到 RAM 中，或者将代码存放到 RTC 存储器中以便在 :doc:`唤醒桩 <deep-sleep-stub>` 和 ULP 协处理器中使用。
+.. list::
 
-.. only:: not SOC_ULP_SUPPORTED
-
-    例如为了提高性能，将关键代码存放到 RAM 中，或者将代码存放到 RTC 存储器中以便在 :doc:`唤醒桩 <deep-sleep-stub>` 中使用。
+    * 将关键代码存放到 RAM 中以提高性能；
+    * 将可执行代码存放到 IRAM 中，以便在缓存被禁用时运行这些代码；
+    :SOC_RTC_MEM_SUPPORTED: * 将代码存放到 RTC 存储器中，以便在 wake stub 中使用；
+    :SOC_ULP_SUPPORTED: * 将代码存放到 RTC 内存中，以便 ULP 协处理器使用。
 
 链接器脚本生成机制可以让用户指定代码和数据在 ESP-IDF 组件中的存放区域。组件包含如何存放符号、目标或完整库的信息。在构建应用程序时，组件中的这些信息会被收集、解析并处理；生成的存放规则用于链接应用程序。
 
@@ -24,16 +25,15 @@
 
 假设用户有::
 
-    component
+    components
     └── my_component
-        └── CMakeLists.txt
-            ├── component.mk
-            ├── Kconfig
-            ├── src/
-            │   ├── my_src1.c
-            │   ├── my_src2.c
-            │   └── my_src3.c
-            └── my_linker_fragment_file.lf
+        ├── CMakeLists.txt
+        ├── Kconfig
+        ├── src/
+        │   ├── my_src1.c
+        │   ├── my_src2.c
+        │   └── my_src3.c
+        └── my_linker_fragment_file.lf
 
 - 名为 ``my_component`` 的组件，在构建过程中存储为 ``libmy_component.a`` 库文件
 - 库文件包含的三个源文件：``my_src1.c``、``my_src2.c`` 和 ``my_src3.c``，编译后分别为 ``my_src1.o``、``my_src2.o`` 和 ``my_src3.o``
@@ -71,6 +71,7 @@
 """"""""""""
 
 假设整个 ``my_src1.o`` 目标文件对性能至关重要，所以最好把该文件放在 RAM 中。另外，``my_src2.o`` 目标文件包含从深度睡眠唤醒所需的符号，因此需要将其存放到 RTC 存储器中。
+
 在链接器片段文件中可以写入以下内容：
 
 .. code-block:: none
@@ -124,6 +125,7 @@
     archive: libmy_component.a
     entries:
         * (rtc)
+
 
 .. _ldgen-conditional-placements :
 
@@ -227,8 +229,8 @@
 - 名称：片段名称，指定片段类型的片段名称应唯一。
 - 键值：片段内容。每个片段类型可支持不同的键值和不同的键值语法。
 
-    - 在 ``段`` 和 ``协议`` 中，仅支持 ``entries`` 键。
-    - 在 ``映射`` 中，键支持 ``archive`` 和 ``entries``。
+    - 在 :ref:`段 <ldgen-sections-fragment>` 和 :ref:`协议 <ldgen-scheme-fragment>` 中，仅支持 ``entries`` 键。
+    - 在 :ref:`映射 <ldgen-mapping-fragment>` 中，支持 ``archive`` 和 ``entries`` 键。
 
 .. note::
 
@@ -283,7 +285,7 @@
         key_1:
             value_1
         key_2:
-            value_b
+            value_a
     else:
         [type:name]
         key_1:
@@ -445,7 +447,7 @@
 2. SORT([<sort_by_first>, <sort_by_second>])
 
     在输入段描述中输出 ``SORT_BY_NAME``, ``SORT_BY_ALIGNMENT``, ``SORT_BY_INIT_PRIORITY`` 或 ``SORT``。
-    
+
    ``sort_by_first`` 和 ``sort_by_second`` 的值可以是：``name``、``alignment``、``init_priority``。
 
     如果既没指定 ``sort_by_first`` 也没指定 ``sort_by_second``，则输入段会按照名称排序，如果两者都指定了，那么嵌套排序会遵循 https://sourceware.org/binutils/docs/ld/Input-Section-Wildcards.html 中的规则。
@@ -473,8 +475,8 @@
     # 注意
     # A. entity-scheme 后使用分号
     # B. section2 -> target2 前使用逗号
-    # C. 在 scheme1 条目中 定义 section1 -> target1 和 section2 -> target2 
-    entity1 (scheme1); 
+    # C. 在 scheme1 条目中定义 section1 -> target1 和 section2 -> target2
+    entity1 (scheme1);
         section1 -> target1 KEEP() ALIGN(4, pre, post),
         section2 -> target2 SURROUND(sym) ALIGN(4, post) SORT()
 

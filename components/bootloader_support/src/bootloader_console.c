@@ -34,13 +34,13 @@
 #include "esp_rom_sys.h"
 #include "esp_rom_caps.h"
 
-#ifdef CONFIG_ESP_CONSOLE_UART_NONE
+#ifdef CONFIG_ESP_CONSOLE_NONE
 void bootloader_console_init(void)
 {
     esp_rom_install_channel_putc(1, NULL);
     esp_rom_install_channel_putc(2, NULL);
 }
-#endif // CONFIG_ESP_CONSOLE_UART_NONE
+#endif // CONFIG_ESP_CONSOLE_NONE
 
 #ifdef CONFIG_ESP_CONSOLE_UART
 void bootloader_console_init(void)
@@ -90,7 +90,7 @@ void bootloader_console_init(void)
     // Set configured UART console baud rate
     uint32_t clock_hz = rtc_clk_apb_freq_get();
 #if ESP_ROM_UART_CLK_IS_XTAL
-    clock_hz = UART_CLK_FREQ_ROM; // From esp32-s3 on, UART clock source is selected to XTAL in ROM
+    clock_hz = (uint32_t)rtc_clk_xtal_freq_get() * MHZ; // From esp32-s3 on, UART clk source is selected to XTAL in ROM
 #endif
     esp_rom_uart_set_clock_baudrate(uart_num, clock_hz, CONFIG_ESP_CONSOLE_UART_BAUDRATE);
 }

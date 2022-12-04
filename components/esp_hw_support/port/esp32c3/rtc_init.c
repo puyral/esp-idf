@@ -14,9 +14,10 @@
 #include "soc/spi_mem_reg.h"
 #include "soc/extmem_reg.h"
 #include "soc/system_reg.h"
+#include "hal/efuse_hal.h"
 #include "regi2c_ctrl.h"
-#include "regi2c_dig_reg.h"
-#include "regi2c_lp_bias.h"
+#include "soc/regi2c_dig_reg.h"
+#include "soc/regi2c_lp_bias.h"
 #include "esp_hw_log.h"
 #include "esp_efuse.h"
 #include "esp_efuse_table.h"
@@ -52,7 +53,7 @@ void rtc_init(rtc_config_t cfg)
 
     if (cfg.cali_ocode) {
         uint32_t rtc_calib_version = 0;
-        esp_err_t err = esp_efuse_read_field_blob(ESP_EFUSE_BLOCK2_VERSION, &rtc_calib_version, 3);
+        esp_err_t err = esp_efuse_read_field_blob(ESP_EFUSE_BLK_VERSION_MAJOR, &rtc_calib_version, ESP_EFUSE_BLK_VERSION_MAJOR[0]->bit_count); // IDF-5366
         if (err != ESP_OK) {
             rtc_calib_version = 0;
             ESP_HW_LOGW(TAG, "efuse read fail, set default rtc_calib_version: %d\n", rtc_calib_version);
@@ -154,6 +155,7 @@ void rtc_init(rtc_config_t cfg)
 
     REG_WRITE(RTC_CNTL_INT_ENA_REG, 0);
     REG_WRITE(RTC_CNTL_INT_CLR_REG, UINT32_MAX);
+    REGI2C_WRITE_MASK(I2C_ULP, I2C_ULP_IR_FORCE_XPD_CK, 1);
 }
 
 rtc_vddsdio_config_t rtc_vddsdio_get_config(void)
@@ -217,13 +219,11 @@ static void calibrate_ocode(void)
     4. wait o-code calibration done flag(odone_flag & bg_odone_flag) or timeout;
     5. set cpu to old-config.
     */
-    rtc_slow_freq_t slow_clk_freq = rtc_clk_slow_freq_get();
-    rtc_slow_freq_t rtc_slow_freq_x32k = RTC_SLOW_FREQ_32K_XTAL;
-    rtc_slow_freq_t rtc_slow_freq_8MD256 = RTC_SLOW_FREQ_8MD256;
+    soc_rtc_slow_clk_src_t slow_clk_src = rtc_clk_slow_src_get();
     rtc_cal_sel_t cal_clk = RTC_CAL_RTC_MUX;
-    if (slow_clk_freq == (rtc_slow_freq_x32k)) {
+    if (slow_clk_src == SOC_RTC_SLOW_CLK_SRC_XTAL32K) {
         cal_clk = RTC_CAL_32K_XTAL;
-    } else if (slow_clk_freq == rtc_slow_freq_8MD256) {
+    } else if (slow_clk_src == SOC_RTC_SLOW_CLK_SRC_RC_FAST_D256) {
         cal_clk  = RTC_CAL_8MD256;
     }
 
@@ -317,12 +317,12 @@ static void set_rtc_dig_dbias()
     3. a reasonable rtc_dbias can be calculated by a certion formula.
     */
     uint32_t rtc_dbias = 28, dig_dbias = 28;
-    uint8_t chip_version = esp_efuse_get_chip_ver();
+    uint8_t chip_version = efuse_hal_get_minor_chip_version();
     if (chip_version >= 3) {
         dig_dbias = get_dig_dbias_by_efuse(chip_version);
         if (dig_dbias != 0) {
-            if (dig_dbias + 4 > 28) {
-                dig_dbias = 28;
+            if (dig_dbias + 4 > 31) {
+                dig_dbias = 31;
             } else {
                 dig_dbias += 4;
             }

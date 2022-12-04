@@ -5,6 +5,7 @@
  */
 
 #include <stdio.h>
+#include "soc/soc.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/queue.h"
@@ -62,7 +63,7 @@ static void example_tg_timer_init(example_timer_user_data_t *user_data)
     int timer = user_data->timer_idx;
 
     timer_config_t config = {
-        .clk_src = TIMER_SRC_CLK_APB,
+        .clk_src = TIMER_SRC_CLK_DEFAULT,
         .divider = APB_CLK_FREQ / TIMER_RESOLUTION_HZ,
         .counter_dir = TIMER_COUNT_UP,
         .counter_en = TIMER_PAUSE,

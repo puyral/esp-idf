@@ -1,8 +1,6 @@
 Core Dump
 =========
 
-{IDF_TARGET_ROM_ELF:default="https://dl.espressif.com/dl/esp32_rom.elf", esp32="https://dl.espressif.com/dl/esp32_rom.elf", esp32s2="https://dl.espressif.com/dl/esp32s2_rom.elf", esp32s3="https://dl.espressif.com/dl/esp32s3_rom.elf", esp32c3="https://dl.espressif.com/dl/esp32c3_rev3_rom.elf"}
-
 Overview
 --------
 
@@ -37,7 +35,7 @@ There are a number of core dump related configuration options which user can cho
    The ELF format contains extended features and allow to save more information about broken tasks and crashed software but it requires more space in the flash memory.
    This format of core dump is recommended for new software designs and is flexible enough to extend saved information for future revisions.
 
-   The Binary format is kept for compatibility standpoint, it uses less space in the memory to keep data and provides better performance.
+   The Binary format is kept for compatibility reasons, it uses less space in the memory to keep data and provides better performance.
 
 **Core dump data integrity check (Components -> Core dump -> Core dump data integrity check)**
 
@@ -67,12 +65,10 @@ There are a number of core dump related configuration options which user can cho
    * Decode and show summary (info_corefile)
    * Don't decode
 
-.. only:: esp32c3
+**Reserved stack size (Components -> Core dump -> Reserved stack size)**
 
-   **Reserved stack size (Components -> Core dump -> Reserved stack size)**
-
-      Size of the memory to be reserved for core dump stack. If 0 core dump process will run on the stack of crashed task/ISR, otherwise special stack will be allocated.
-      To ensure that core dump itself will not overflow task/ISR stack set this to the value above 800.
+   Size of the memory to be reserved for core dump stack. If 0 core dump process will run on the stack of crashed task/ISR, otherwise special stack will be allocated.
+   To ensure that core dump itself will not overflow task/ISR stack set this to the value above 800.
 
 Save core dump to flash
 -----------------------
@@ -134,7 +130,7 @@ ROM Functions in Backtraces
 It is possible situation that at the moment of crash some tasks or/and crashed task itself have one or more ROM functions in their callstacks.
 Since ROM is not part of the program ELF it will be impossible for GDB to parse such callstacks, because it tries to analyse functions' prologues to accomplish that.
 In that case callstack printing will be broken with error message at the first ROM function.
-To overcome this issue you can use ROM ELF provided by Espressif ({IDF_TARGET_ROM_ELF}) and pass it to 'espcoredump.py'.
+To overcome this issue, you can use the `ROM ELF <https://github.com/espressif/esp-rom-elfs/releases>`_ provided by Espressif. You can find the {IDF_TARGET_PATH_NAME}'s corresponding ROM ELF file from the list of released archives. The ROM ELF file can then be passed to ``espcoredump.py``. More details about ROM ELFs can be found `here <https://github.com/espressif/esp-rom-elfs/blob/master/README.md>`_.
 
 Dumping variables on demand
 ---------------------------
@@ -145,9 +141,11 @@ Core dump supports retrieving variable data over GDB by attributing special nota
 Supported notations and RAM regions
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-* ``COREDUMP_DRAM_ATTR`` places variable into DRAM area which will be included into dump.
-* ``COREDUMP_RTC_ATTR`` places variable into RTC area which will be included into dump.
-* ``COREDUMP_RTC_FAST_ATTR`` places variable into RTC_FAST area which will be included into dump.
+.. list::
+
+   * ``COREDUMP_DRAM_ATTR`` places variable into DRAM area which will be included into dump.
+   :SOC_RTC_FAST_MEM_SUPPORTED or SOC_RTC_SLOW_MEM_SUPPORTED: * ``COREDUMP_RTC_ATTR`` places variable into RTC area which will be included into dump.
+   :SOC_RTC_FAST_MEM_SUPPORTED: * ``COREDUMP_RTC_FAST_ATTR`` places variable into RTC_FAST area which will be included into dump.
 
 Example
 ^^^^^^^
@@ -190,7 +188,7 @@ Generic command syntax: ``espcoredump.py [options] command [args]``
 
 :Script Options:
 
-   --chip {auto,esp32,esp32s2,esp32s3,esp32c3}
+   --chip {auto,esp32,esp32s2,esp32s3,esp32c2,esp32c3}
                      Target chip type. Default value is "auto"
 
    --port PORT, -p PORT  Serial port device. Either "chip" or "port" need to be specified to determine the port when you have multi-target connected at the same time.

@@ -12,15 +12,14 @@ set(srcs
     )
 
 if(NOT BOOTLOADER_BUILD)
-    list(APPEND srcs "async_memcpy_impl_cp_dma.c"
-                     "memprot.c"
+    list(APPEND srcs "memprot.c"
                      "esp_hmac.c"
                      "esp_crypto_lock.c"
-                     "esp_ds.c"
-                     "dport_access.c"
-                     "spiram.c"
-                     "mmu_psram.c"
-                     "spiram_psram.c")
+                     "esp_ds.c")
+
+    # init constructor for wifi
+    list(APPEND srcs "adc2_init_cal.c")
+
 endif()
 
 add_prefix(srcs "${CMAKE_CURRENT_LIST_DIR}/" "${srcs}")

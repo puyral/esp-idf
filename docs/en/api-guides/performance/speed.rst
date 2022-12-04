@@ -42,7 +42,7 @@ Otherwise, one way to measure performance is to augment the code to take timing 
 
         uint64_t end = esp_timer_get_time();
 
-        printf("%u iterations took %ull milliseconds (%ull microseconds per invocation)\n",
+        printf("%u iterations took %llu milliseconds (%llu microseconds per invocation)\n",
                MEASUREMENTS, (end - start)/1000, (end - start)/MEASUREMENTS);
     }
 
@@ -125,12 +125,12 @@ In addition to the overall performance improvements shown above, the following o
 
 .. list::
 
-   - Minimizing the :ref:`CONFIG_LOG_DEFAULT_LEVEL` and :ref:`CONFIG_BOOTLOADER_LOG_LEVEL` has a large impact on startup time. To enable more logging after the app starts up, set the :ref:`CONFIG_LOG_MAXIMUM_LEVEL` as well and then call :cpp:func:`esp_log_set_level` to restore higher level logs. The :example:`system/startup_time` main function shows how to do this.
-   - If using deep sleep, setting :ref:`CONFIG_BOOTLOADER_SKIP_VALIDATE_IN_DEEP_SLEEP` allows a faster wake from sleep. Note that if using Secure Boot this represents a security compromise, as Secure Boot validation will not be performed on wake.
+   - Minimizing the :ref:`CONFIG_LOG_DEFAULT_LEVEL` and :ref:`CONFIG_BOOTLOADER_LOG_LEVEL` has a large impact on startup time. To enable more logging after the app starts up, set the :ref:`CONFIG_LOG_MAXIMUM_LEVEL` as well and then call :cpp:func:`esp_log_level_set` to restore higher level logs. The :example:`system/startup_time` main function shows how to do this.
+   :SOC_RTC_FAST_MEM_SUPPORTED: - If using deep sleep, setting :ref:`CONFIG_BOOTLOADER_SKIP_VALIDATE_IN_DEEP_SLEEP` allows a faster wake from sleep. Note that if using Secure Boot this represents a security compromise, as Secure Boot validation will not be performed on wake.
    - Setting :ref:`CONFIG_BOOTLOADER_SKIP_VALIDATE_ON_POWER_ON` will skip verifying the binary on every boot from power-on reset. How much time this saves depends on the binary size and the flash settings. Note that this setting carries some risk if the flash becomes corrupt unexpectedly. Read the help text of the :ref:`config item <CONFIG_BOOTLOADER_SKIP_VALIDATE_ON_POWER_ON>` for an explanation and recommendations if using this option.
-   - It's possible to save a small amount of time during boot by disabling RTC slow clock calibration. To do so, set :ref:`CONFIG_{IDF_TARGET_CFG_PREFIX}_RTC_CLK_CAL_CYCLES` to 0. Any part of the firmware that uses RTC slow clock as a timing source will be less accurate as a result.
+   - It's possible to save a small amount of time during boot by disabling RTC slow clock calibration. To do so, set :ref:`CONFIG_RTC_CLK_CAL_CYCLES` to 0. Any part of the firmware that uses RTC slow clock as a timing source will be less accurate as a result.
 
-The example project :example:`system/startup_time` is pre-configured to optimize startup time. The files :example_file:`system/startup_time/sdkconfig.defaults` and :example_file:`system/startup_time/sdkconfig.defaults.{IDF_TARGET_PATH_NAME}` contain all of these settings. You can append these to the end of your project's own ``sdkconfig`` file to merge the settings, but please read the documentation for each setting first.
+The example project :example:`system/startup_time` is pre-configured to optimize startup time. The file :example_file:`system/startup_time/sdkconfig.defaults` contain all of these settings. You can append these to the end of your project's own ``sdkconfig`` file to merge the settings, but please read the documentation for each setting first.
 
 Task Priorities
 ---------------
@@ -168,8 +168,8 @@ Common priorities are:
         :SOC_BT_SUPPORTED: - :doc:`Bluetooth Controller </api-reference/bluetooth/index>` task has high priority (23, ``ESP_TASK_BT_CONTROLLER_PRIO``). The Bluetooth Controller needs to respond to requests with low latency, so it should always be close to the highest priority task in the system.
         :SOC_BT_SUPPORTED: - :doc:`NimBLE Bluetooth Host </api-reference/bluetooth/nimble/index>` host task has high priority (21).
         - The Ethernet driver creates a task for the MAC to receive Ethernet frames. If using the default config ``ETH_MAC_DEFAULT_CONFIG`` then the priority is medium-high (15). This setting can be changed by passing a custom :cpp:class:`eth_mac_config_t` struct when initializing the Ethernet MAC.
-        - If using the :doc:`mDNS </api-reference/protocols/mdns>` component, it creates a task with default low priority 1 (:ref:`configurable<CONFIG_MDNS_TASK_PRIORITY>`.
         - If using the :doc:`MQTT </api-reference/protocols/mqtt>` component, it creates a task with default priority 5 (:ref:`configurable<CONFIG_MQTT_TASK_PRIORITY>`, depends on :ref:`CONFIG_MQTT_USE_CUSTOM_CONFIG` (also configurable runtime by ``task_prio`` field in the :cpp:class:`esp_mqtt_client_config_t`)
+        - To see what is the task priority for ``mDNS`` service, please check `Performance Optimization <https://espressif.github.io/esp-protocols/mdns/en/index.html#execution-speed>`__.
 
 .. only :: not CONFIG_FREERTOS_UNICORE
 
@@ -191,8 +191,8 @@ Common priorities are:
 
                All Bluedroid Tasks are pinned to the same core, which is Core 0 by default (:ref:`configurable <CONFIG_BT_BLUEDROID_PINNED_TO_CORE_CHOICE>`).
         - The Ethernet driver creates a task for the MAC to receive Ethernet frames. If using the default config ``ETH_MAC_DEFAULT_CONFIG`` then the priority is medium-high (15) and the task is not pinned to any core. These settings can be changed by passing a custom :cpp:class:`eth_mac_config_t` struct when initializing the Ethernet MAC.
-        - If using the :doc:`mDNS </api-reference/protocols/mdns>` component, it creates a task with default low priority 1 (:ref:`configurable <CONFIG_MDNS_TASK_PRIORITY>`) and pinned to CPU0 (:ref:`configurable <CONFIG_MDNS_TASK_AFFINITY>`).
         - If using the :doc:`MQTT </api-reference/protocols/mqtt>` component, it creates a task with default priority 5 (:ref:`configurable <CONFIG_MQTT_TASK_PRIORITY>`, depends on :ref:`CONFIG_MQTT_USE_CUSTOM_CONFIG`) and not pinned to any core (:ref:`configurable <CONFIG_MQTT_TASK_CORE_SELECTION_ENABLED>`).
+        - To see what is the task priority for ``mDNS`` service, please check `Performance Optimization <https://espressif.github.io/esp-protocols/mdns/en/index.html#execution-speed>`__.
 
 Choosing application task priorities
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

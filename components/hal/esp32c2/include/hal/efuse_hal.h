@@ -16,16 +16,10 @@
 extern "C" {
 #endif
 
-
-/**
- * @brief get chip version
- */
-uint32_t efuse_hal_get_chip_revision(void);
-
 /**
  * @brief set eFuse timings
  *
- * @param apb_freq_hz APB frequency in Hz
+ * @param apb_freq_hz APB frequency in Hz (not used, kept for API compatibility)
  */
 void efuse_hal_set_timing(uint32_t apb_freq_hz);
 
@@ -53,6 +47,16 @@ void efuse_hal_program(uint32_t block);
  * @param rs_values Pointer to write encoded data to (length 12 bytes)
  */
 void efuse_hal_rs_calculate(const void *data, void *rs_values);
+
+/**
+ * @brief Checks coding error in a block
+ *
+ * @param block Index of efuse block
+ *
+ * @return True  - block has an error.
+ *         False - no error.
+ */
+bool efuse_hal_is_coding_error_in_block(unsigned block);
 
 #ifdef __cplusplus
 }

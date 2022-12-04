@@ -19,6 +19,12 @@
 
 #if !defined(CONFIG_FREERTOS_UNICORE) || defined(CONFIG_APPTRACE_GCOV_ENABLE)
 
+#if CONFIG_COMPILER_OPTIMIZATION_NONE
+#define IPC_STACK_SIZE (CONFIG_ESP_IPC_TASK_STACK_SIZE + 0x100)
+#else
+#define IPC_STACK_SIZE (CONFIG_ESP_IPC_TASK_STACK_SIZE)
+#endif //CONFIG_COMPILER_OPTIMIZATION_NONE
+
 static DRAM_ATTR StaticSemaphore_t s_ipc_mutex_buffer[portNUM_PROCESSORS];
 static DRAM_ATTR StaticSemaphore_t s_ipc_sem_buffer[portNUM_PROCESSORS];
 static DRAM_ATTR StaticSemaphore_t s_ipc_ack_buffer[portNUM_PROCESSORS];
@@ -69,14 +75,17 @@ static void IRAM_ATTR ipc_task(void* arg)
         }
 #endif
         if (s_func[cpuid]) {
+            // we need to cache s_func, s_func_arg and s_ipc_wait variables locally because they can be changed by a subsequent IPC call.
             esp_ipc_func_t func = s_func[cpuid];
+            s_func[cpuid] = NULL;
             void* arg = s_func_arg[cpuid];
+            esp_ipc_wait_t ipc_wait = s_ipc_wait[cpuid];
 
-            if (s_ipc_wait[cpuid] == IPC_WAIT_FOR_START) {
+            if (ipc_wait == IPC_WAIT_FOR_START) {
                 xSemaphoreGive(s_ipc_ack[cpuid]);
             }
             (*func)(arg);
-            if (s_ipc_wait[cpuid] == IPC_WAIT_FOR_END) {
+            if (ipc_wait == IPC_WAIT_FOR_END) {
                 xSemaphoreGive(s_ipc_ack[cpuid]);
             }
         }
@@ -104,14 +113,14 @@ static void esp_ipc_init(void) __attribute__((constructor));
 
 static void esp_ipc_init(void)
 {
-    char task_name[15];
+    char task_name[configMAX_TASK_NAME_LEN];
 
     for (int i = 0; i < portNUM_PROCESSORS; ++i) {
         snprintf(task_name, sizeof(task_name), "ipc%d", i);
         s_ipc_mutex[i] = xSemaphoreCreateMutexStatic(&s_ipc_mutex_buffer[i]);
         s_ipc_ack[i] = xSemaphoreCreateBinaryStatic(&s_ipc_ack_buffer[i]);
         s_ipc_sem[i] = xSemaphoreCreateBinaryStatic(&s_ipc_sem_buffer[i]);
-        portBASE_TYPE res = xTaskCreatePinnedToCore(ipc_task, task_name, CONFIG_ESP_IPC_TASK_STACK_SIZE, (void*) i,
+        portBASE_TYPE res = xTaskCreatePinnedToCore(ipc_task, task_name, IPC_STACK_SIZE, (void*) i,
                                                     configMAX_PRIORITIES - 1, &s_ipc_task_handle[i], i);
         assert(res == pdTRUE);
         (void)res;
@@ -146,7 +155,6 @@ static esp_err_t esp_ipc_call_and_wait(uint32_t cpu_id, esp_ipc_func_t func, voi
     s_ipc_wait[cpu_id] = wait_for;
     xSemaphoreGive(s_ipc_sem[cpu_id]);
     xSemaphoreTake(s_ipc_ack[cpu_id], portMAX_DELAY);
-    s_func[cpu_id] = NULL;
 #ifdef CONFIG_ESP_IPC_USES_CALLERS_PRIORITY
     xSemaphoreGive(s_ipc_mutex[cpu_id]);
 #else

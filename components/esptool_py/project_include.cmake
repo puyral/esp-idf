@@ -20,27 +20,42 @@ set(ESPSECUREPY ${python} "${CMAKE_CURRENT_LIST_DIR}/esptool/espsecure.py")
 set(ESPEFUSEPY ${python} "${CMAKE_CURRENT_LIST_DIR}/esptool/espefuse.py")
 set(ESPMONITOR ${python} "${idf_path}/tools/idf_monitor.py")
 
-set(ESPFLASHMODE ${CONFIG_ESPTOOLPY_FLASHMODE})
+if(CONFIG_SPI_FLASH_HPM_ENABLE)
+# When set flash frequency to 120M, must keep 1st bootloader work under ``DOUT`` mode
+# because on some flash chips, 120M will modify the status register,
+# which will make ROM won't work.
+# This change intends to be for esptool only and the bootloader should keep use
+# ``DOUT`` mode.
+    set(ESPFLASHMODE "dout")
+    message("Note: HPM is enabled for the flash, force the ROM bootloader into DOUT mode for stable boot on")
+else()
+    set(ESPFLASHMODE ${CONFIG_ESPTOOLPY_FLASHMODE})
+endif()
 set(ESPFLASHFREQ ${CONFIG_ESPTOOLPY_FLASHFREQ})
 set(ESPFLASHSIZE ${CONFIG_ESPTOOLPY_FLASHSIZE})
 
 set(ESPTOOLPY_CHIP "${chip_model}")
 
-set(ESPTOOLPY_FLASH_OPTIONS
+set(esptool_elf2image_args
     --flash_mode ${ESPFLASHMODE}
     --flash_freq ${ESPFLASHFREQ}
     --flash_size ${ESPFLASHSIZE}
     )
 
+set(MMU_PAGE_SIZE ${CONFIG_MMU_PAGE_MODE})
+
 if(NOT BOOTLOADER_BUILD)
-    set(esptool_elf2image_args --elf-sha256-offset 0xb0)
+    list(APPEND esptool_elf2image_args --elf-sha256-offset 0xb0)
+    if(CONFIG_IDF_TARGET_ESP32C2)
+        list(APPEND esptool_elf2image_args --flash-mmu-page-size ${MMU_PAGE_SIZE})
+    endif()
 endif()
 
 if(NOT CONFIG_SECURE_BOOT_ALLOW_SHORT_APP_PARTITION AND
     NOT BOOTLOADER_BUILD)
     if(CONFIG_SECURE_SIGNED_APPS_ECDSA_SCHEME)
         list(APPEND esptool_elf2image_args --secure-pad)
-    elseif(CONFIG_SECURE_SIGNED_APPS_RSA_SCHEME)
+    elseif(CONFIG_SECURE_SIGNED_APPS_RSA_SCHEME OR CONFIG_SECURE_SIGNED_APPS_ECDSA_V2_SCHEME)
         list(APPEND esptool_elf2image_args --secure-pad-v2)
     endif()
 endif()
@@ -51,6 +66,9 @@ endif()
 if(CONFIG_ESP32C3_REV_MIN)
     set(min_rev ${CONFIG_ESP32C3_REV_MIN})
 endif()
+if(CONFIG_IDF_TARGET_ESP32C2)
+    set(min_rev 1)
+endif()
 
 if(min_rev)
     list(APPEND esptool_elf2image_args --min-rev ${min_rev})
@@ -58,10 +76,15 @@ if(min_rev)
     unset(min_rev)
 endif()
 
-if(CONFIG_ESPTOOLPY_FLASHSIZE_DETECT)
-    # Set ESPFLASHSIZE to 'detect' *after* elf2image options are generated,
+if(CONFIG_ESPTOOLPY_HEADER_FLASHSIZE_UPDATE)
+    # Set ESPFLASHSIZE to 'detect' *after* esptool_elf2image_args are generated,
     # as elf2image can't have 'detect' as an option...
     set(ESPFLASHSIZE detect)
+
+    # Flash size detection updates the image header which would invalidate the appended
+    # SHA256 digest. Therefore, a digest is not appended in that case.
+    # This argument requires esptool>=4.1.
+    list(APPEND esptool_elf2image_args --dont-append-digest)
 endif()
 
 if(CONFIG_SECURE_SIGNED_APPS_RSA_SCHEME)
@@ -87,7 +110,7 @@ set(PROJECT_BIN "${elf_name}.bin")
 #
 if(CONFIG_APP_BUILD_GENERATE_BINARIES)
     add_custom_command(OUTPUT "${build_dir}/.bin_timestamp"
-        COMMAND ${ESPTOOLPY} elf2image ${ESPTOOLPY_FLASH_OPTIONS} ${esptool_elf2image_args}
+        COMMAND ${ESPTOOLPY} elf2image ${esptool_elf2image_args}
             -o "${build_dir}/${unsigned_project_binary}" "${elf_dir}/${elf}"
         COMMAND ${CMAKE_COMMAND} -E echo "Generated ${build_dir}/${unsigned_project_binary}"
         COMMAND ${CMAKE_COMMAND} -E md5sum "${build_dir}/${unsigned_project_binary}" > "${build_dir}/.bin_timestamp"
@@ -110,13 +133,15 @@ endif()
 
 if(CONFIG_SECURE_SIGNED_APPS_ECDSA_SCHEME)
     set(secure_boot_version "1")
-elseif(CONFIG_SECURE_SIGNED_APPS_RSA_SCHEME)
+elseif(CONFIG_SECURE_SIGNED_APPS_RSA_SCHEME OR CONFIG_SECURE_SIGNED_APPS_ECDSA_V2_SCHEME)
     set(secure_boot_version "2")
 endif()
 
 if(NOT BOOTLOADER_BUILD AND CONFIG_SECURE_SIGNED_APPS)
     if(CONFIG_SECURE_BOOT_BUILD_SIGNED_BINARIES)
         # for locally signed secure boot image, add a signing step to get from unsigned app to signed app
+        get_filename_component(secure_boot_signing_key "${CONFIG_SECURE_BOOT_SIGNING_KEY}"
+            ABSOLUTE BASE_DIR "${project_dir}")
         add_custom_command(OUTPUT "${build_dir}/.signed_bin_timestamp"
             COMMAND ${ESPSECUREPY} sign_data --version ${secure_boot_version} --keyfile ${secure_boot_signing_key}
                 -o "${build_dir}/${PROJECT_BIN}" "${build_dir}/${unsigned_project_binary}"
@@ -183,7 +208,8 @@ if(CONFIG_ESPTOOLPY_NO_STUB)
 endif()
 
 idf_component_set_property(esptool_py FLASH_ARGS "${esptool_flash_main_args}")
-idf_component_set_property(esptool_py FLASH_SUB_ARGS "${ESPTOOLPY_FLASH_OPTIONS}")
+idf_component_set_property(esptool_py FLASH_SUB_ARGS "--flash_mode ${ESPFLASHMODE} --flash_freq ${ESPFLASHFREQ} \
+--flash_size ${ESPFLASHSIZE}")
 
 function(esptool_py_partition_needs_encryption retencrypted partition_name)
     # Check if encryption is enabled

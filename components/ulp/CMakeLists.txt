@@ -23,7 +23,8 @@ if(CONFIG_SOC_ULP_SUPPORTED OR CONFIG_SOC_RISCV_COPROC_SUPPORTED)
 
     elseif(CONFIG_ULP_COPROC_TYPE_RISCV)
         list(APPEND srcs
-            "ulp_riscv/ulp_riscv.c")
+            "ulp_riscv/ulp_riscv.c"
+            "ulp_riscv/ulp_riscv_adc.c")
 
         list(APPEND includes
             ulp_riscv/include)
@@ -31,4 +32,9 @@ if(CONFIG_SOC_ULP_SUPPORTED OR CONFIG_SOC_RISCV_COPROC_SUPPORTED)
 endif()
 
 idf_component_register(SRCS ${srcs}
-                       INCLUDE_DIRS ${includes})
+                       INCLUDE_DIRS ${includes}
+                       REQUIRES driver esp_adc)
+
+if(CONFIG_SOC_ULP_SUPPORTED OR CONFIG_SOC_RISCV_COPROC_SUPPORTED)
+    target_compile_options(${COMPONENT_LIB} PRIVATE "-Wno-format")
+endif()

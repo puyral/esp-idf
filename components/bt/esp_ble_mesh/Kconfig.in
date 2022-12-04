@@ -68,7 +68,7 @@ if BLE_MESH
 
     config BLE_MESH_FREERTOS_STATIC_ALLOC
         bool "Enable FreeRTOS static allocation"
-        depends on FREERTOS_SUPPORT_STATIC_ALLOCATION && (ESP32_SPIRAM_SUPPORT || ESP32_IRAM_AS_8BIT_ACCESSIBLE_MEMORY)
+        depends on FREERTOS_SUPPORT_STATIC_ALLOCATION && ((IDF_TARGET_ESP32 && SPIRAM) || ESP32_IRAM_AS_8BIT_ACCESSIBLE_MEMORY) # NOERROR
         default n
         help
             Enable this option to use FreeRTOS static allocation APIs for BLE Mesh,
@@ -85,7 +85,7 @@ if BLE_MESH
 
         config BLE_MESH_FREERTOS_STATIC_ALLOC_EXTERNAL
             bool "External SPIRAM"
-            depends on ESP32_SPIRAM_SUPPORT
+            depends on IDF_TARGET_ESP32 && SPIRAM
             help
                 If enabled, BLE Mesh allocates dynamic memory from external SPIRAM for
                 FreeRTOS objects, i.e. mutex, queue, and task stack. External SPIRAM
@@ -803,6 +803,13 @@ if BLE_MESH
             help
                 Maximum number of groups to which the LPN can subscribe.
 
+        config BLE_MESH_LPN_SUB_ALL_NODES_ADDR
+            bool "Automatically subscribe all nodes address"
+            default n
+            help
+                Automatically subscribe all nodes address when friendship
+                established.
+
     endif # BLE_MESH_LOW_POWER
 
     config BLE_MESH_FRIEND
@@ -1093,6 +1100,13 @@ if BLE_MESH
             This option removes the 96 hour limit of the IV Update Procedure and
             lets the state to be changed at any time.
             If IV Update test mode is going to be used, this option should be enabled.
+
+    config BLE_MESH_DISCARD_OLD_SEQ_AUTH
+        bool
+        default y
+        help
+            This option is used to decide whether discarding the old SeqAuth when
+            receiving a segmented message.
 
     menu "BLE Mesh specific test option"
 

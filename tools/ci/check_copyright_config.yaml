@@ -59,20 +59,25 @@ examples_and_unit_tests:
   - CC0-1.0
   license_for_new_files: Unlicense OR CC0-1.0
 
-freemodbus_component:
+lwip_component:
   include:
-    - 'components/freemodbus/**'
+    - 'components/lwip/**'
+    - 'components/esp_netif/lwip/**'
   allowed_licenses:
     - Apache-2.0
     - BSD-3-Clause
   license_for_new_files: Apache-2.0
 
-lwip_component:
+newlib_component:
   include:
-    - 'components/lwip/**'
+    - 'components/newlib/platform_include/**'
+    - 'components/newlib/port/**'
+    - 'components/newlib/priv_include/**'
+    - 'components/newlib/*.c'
+    - 'components/newlib/*.h'
   allowed_licenses:
     - Apache-2.0
-    - BSD-3-Clause
+    - BSD-2-Clause-FreeBSD AND Apache-2.0
   license_for_new_files: Apache-2.0
 
 asio_component:
@@ -88,6 +93,14 @@ freertos_component:
   allowed_licenses:
     - Apache-2.0    #Files added to the freertos added by us
     - MIT           #FreeRTOS sources and port files
+
+ethernet_component:
+  include:
+    - 'components/esp_eth/include/**'
+    - 'components/esp_eth/src/**'
+  allowed_licenses:
+    - Apache-2.0
+    - MIT           # To allow contributed drivers
 
 systemview:
   include:
@@ -112,6 +125,26 @@ sdmmc:
     - Apache-2.0
     - ISC
 
+argtable3:
+  include:
+    - 'components/console/argtable3/'
+  allowed_licenses:
+    - BSD-3-Clause
+    - Apache-2.0
+
+xtensa:
+  include:
+    - 'components/xtensa/**'
+  allowed_licenses:
+    - Apache-2.0    #Files added to the xtensa component by us
+    - MIT           #Cadence sources
+tinyusb:
+  include:
+    - 'examples/peripherals/usb/device/tusb_midi/'
+  allowed_licenses:
+    - Apache-2.0
+    - MIT
+
 # files matching this section do not perform the check
 # file patterns starting with ! are negated, meaning files matching them won't match the section.
 ignore:
@@ -119,6 +152,8 @@ ignore:
   include:
     - components/bt/host/nimble/nimble/
     - components/bt/common/osi/
+    - components/bt/porting/ext/
+    - components/bt/porting/nimble/
     - components/http_parser/
     - components/wpa_supplicant/src/
     - '!components/wpa_supplicant/esp_supplicant/'

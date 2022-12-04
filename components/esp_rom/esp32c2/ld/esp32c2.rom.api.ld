@@ -30,9 +30,9 @@ PROVIDE ( esp_rom_uart_rx_one_char    = uart_rx_one_char );
 PROVIDE ( esp_rom_uart_rx_string      = UartRxString );
 PROVIDE ( esp_rom_uart_putc           = ets_write_char_uart );
 
-PROVIDE ( esp_rom_mbedtls_md5_starts_ret = 0x40002a34 );
-PROVIDE ( esp_rom_mbedtls_md5_update_ret = 0x40002a38 );
-PROVIDE ( esp_rom_mbedtls_md5_finish_ret = 0x40002a3c );
+PROVIDE ( esp_rom_mbedtls_md5_starts_ret = mbedtls_md5_starts_ret );
+PROVIDE ( esp_rom_mbedtls_md5_update_ret = mbedtls_md5_update_ret );
+PROVIDE ( esp_rom_mbedtls_md5_finish_ret = mbedtls_md5_finish_ret );
 
 PROVIDE ( esp_rom_printf   = ets_printf );
 PROVIDE ( esp_rom_delay_us = ets_delay_us );
@@ -40,9 +40,15 @@ PROVIDE ( esp_rom_get_reset_reason = rtc_get_reset_reason );
 PROVIDE ( esp_rom_route_intr_matrix = intr_matrix_set );
 PROVIDE ( esp_rom_get_cpu_ticks_per_us = ets_get_cpu_frequency );
 
-PROVIDE( esp_rom_spiflash_attach = spi_flash_attach );
+PROVIDE ( esp_rom_spiflash_attach = spi_flash_attach );
 PROVIDE ( esp_rom_spiflash_clear_bp = esp_rom_spiflash_unlock );
 PROVIDE ( esp_rom_spiflash_write_enable = SPI_write_enable);
+PROVIDE ( esp_rom_spiflash_erase_area = SPIEraseArea );
+
+PROVIDE ( esp_rom_spiflash_fix_dummylen = spi_dummy_len_fix );
+PROVIDE ( esp_rom_spiflash_set_drvs = SetSpiDrvs);
+PROVIDE ( esp_rom_spiflash_select_padsfunc = SelectSpiFunction );
+PROVIDE ( esp_rom_spiflash_common_cmd = SPI_Common_Command );
 
 PROVIDE ( esp_rom_regi2c_read = rom_i2c_readReg );
 PROVIDE ( esp_rom_regi2c_read_mask = rom_i2c_readReg_Mask );

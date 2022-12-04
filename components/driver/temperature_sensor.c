@@ -1,19 +1,18 @@
 /*
- * SPDX-FileCopyrightText: 2016-2022 Espressif Systems (Shanghai) CO LTD
+ * SPDX-FileCopyrightText: 2022 Espressif Systems (Shanghai) CO LTD
  *
  * SPDX-License-Identifier: Apache-2.0
  */
 
+#include <stdlib.h>
+#include <math.h>
+#include <string.h>
 #include "sdkconfig.h"
 #if CONFIG_TEMP_SENSOR_ENABLE_DEBUG_LOG
 // The local log level must be defined before including esp_log.h
 // Set the maximum log level for this source file
 #define LOG_LOCAL_LEVEL ESP_LOG_DEBUG
 #endif
-
-#include <stdlib.h>
-#include <math.h>
-#include <string.h>
 #include "esp_log.h"
 #include "sys/lock.h"
 #include "soc/rtc.h"
@@ -25,53 +24,48 @@
 #include "driver/temperature_sensor.h"
 #include "esp_efuse_rtc_calib.h"
 #include "esp_private/periph_ctrl.h"
-#include "hal/temperature_sensor_types.h"
 #include "hal/temperature_sensor_ll.h"
+#include "soc/temperature_sensor_periph.h"
 
 static const char *TAG = "temperature_sensor";
 
-extern portMUX_TYPE rtc_spinlock; //TODO: Will be placed in the appropriate position after the rtc module is finished.
-#define TEMPERATURE_SENSOR_ENTER_CRITICAL()  portENTER_CRITICAL(&rtc_spinlock)
-#define TEMPERATURE_SENSOR_EXIT_CRITICAL()  portEXIT_CRITICAL(&rtc_spinlock)
-
 typedef enum {
-    TSENS_HW_STATE_UNCONFIGURED,
-    TSENS_HW_STATE_CONFIGURED,
-    TSENS_HW_STATE_STARTED,
-} temp_sensor_state_t;
+    TEMP_SENSOR_FSM_INIT,
+    TEMP_SENSOR_FSM_ENABLE,
+} temp_sensor_fsm_t;
 
 static float s_deltaT = NAN; // unused number
 
 typedef struct temperature_sensor_obj_t temperature_sensor_obj_t;
 
 struct temperature_sensor_obj_t {
-    const temp_sensor_ll_attribute_t *tsens_attribute;
-    temp_sensor_state_t  tsens_hw_state;
+    const temperature_sensor_attribute_t *tsens_attribute;
+    temp_sensor_fsm_t  fsm;
     temperature_sensor_clk_src_t clk_src;
 };
 
-static temp_sensor_ll_attribute_t *s_tsens_attribute_copy;
+static temperature_sensor_attribute_t *s_tsens_attribute_copy;
 
 static int inline accuracy_compare(const void *p1, const void *p2)
 {
-    return ((*(temp_sensor_ll_attribute_t*)p1).error_max < (*(temp_sensor_ll_attribute_t*)p2).error_max) ? -1 : 1;
+    return ((*(temperature_sensor_attribute_t *)p1).error_max < (*(temperature_sensor_attribute_t *)p2).error_max) ? -1 : 1;
 }
 
 static esp_err_t temperature_sensor_attribute_table_sort(void)
 {
-    s_tsens_attribute_copy = (temp_sensor_ll_attribute_t*)heap_caps_malloc(sizeof(temp_sensor_ll_attributes), MALLOC_CAP_DEFAULT);
+    s_tsens_attribute_copy = (temperature_sensor_attribute_t *)heap_caps_malloc(sizeof(temperature_sensor_attributes), MALLOC_CAP_DEFAULT);
     ESP_RETURN_ON_FALSE(s_tsens_attribute_copy != NULL, ESP_ERR_NO_MEM, TAG, "No space for s_tsens_attribute_copy");
-    for (int i = 0 ; i < TEMPERATURE_SENSOR_LL_RANGE_NUM; i++) {
-        s_tsens_attribute_copy[i] = temp_sensor_ll_attributes[i];
+    for (int i = 0 ; i < TEMPERATURE_SENSOR_ATTR_RANGE_NUM; i++) {
+        s_tsens_attribute_copy[i] = temperature_sensor_attributes[i];
     }
     // Sort from small to large by error_max.
-    qsort(s_tsens_attribute_copy, TEMPERATURE_SENSOR_LL_RANGE_NUM, sizeof(s_tsens_attribute_copy[0]), accuracy_compare);
+    qsort(s_tsens_attribute_copy, TEMPERATURE_SENSOR_ATTR_RANGE_NUM, sizeof(s_tsens_attribute_copy[0]), accuracy_compare);
     return ESP_OK;
 }
 
 static esp_err_t temperature_sensor_choose_best_range(temperature_sensor_handle_t tsens, const temperature_sensor_config_t *tsens_config)
 {
-    for (int i = 0 ; i < TEMPERATURE_SENSOR_LL_RANGE_NUM; i++) {
+    for (int i = 0 ; i < TEMPERATURE_SENSOR_ATTR_RANGE_NUM; i++) {
         if ((tsens_config->range_min >= s_tsens_attribute_copy[i].range_min) && (tsens_config->range_max <= s_tsens_attribute_copy[i].range_max)) {
             tsens->tsens_attribute = &s_tsens_attribute_copy[i];
             break;
@@ -83,15 +77,15 @@ static esp_err_t temperature_sensor_choose_best_range(temperature_sensor_handle_
 
 esp_err_t temperature_sensor_install(const temperature_sensor_config_t *tsens_config, temperature_sensor_handle_t *ret_tsens)
 {
-    esp_err_t ret = ESP_OK;
 #if CONFIG_TEMP_SENSOR_ENABLE_DEBUG_LOG
     esp_log_level_set(TAG, ESP_LOG_DEBUG);
 #endif
+    esp_err_t ret = ESP_OK;
     ESP_RETURN_ON_FALSE((tsens_config && ret_tsens), ESP_ERR_INVALID_ARG, TAG, "Invalid argument");
     ESP_RETURN_ON_FALSE((s_tsens_attribute_copy == NULL), ESP_ERR_INVALID_STATE, TAG, "Already installed");
-    temperature_sensor_handle_t tsens;
-    tsens = (temperature_sensor_obj_t*) heap_caps_calloc(1, sizeof(temperature_sensor_obj_t), MALLOC_CAP_DEFAULT);
-    ESP_GOTO_ON_FALSE(tsens != NULL, ESP_ERR_NO_MEM, err, TAG, "install fail...");
+    temperature_sensor_handle_t tsens = NULL;
+    tsens = (temperature_sensor_obj_t *) heap_caps_calloc(1, sizeof(temperature_sensor_obj_t), MALLOC_CAP_DEFAULT);
+    ESP_GOTO_ON_FALSE(tsens != NULL, ESP_ERR_NO_MEM, err, TAG, "no mem for temp sensor");
     tsens->clk_src = tsens_config->clk_src;
 
     periph_module_enable(PERIPH_TEMPSENSOR_MODULE);
@@ -103,10 +97,12 @@ esp_err_t temperature_sensor_install(const temperature_sensor_config_t *tsens_co
              tsens->tsens_attribute->range_min,
              tsens->tsens_attribute->range_max,
              tsens->tsens_attribute->error_max);
-    TEMPERATURE_SENSOR_ENTER_CRITICAL();
+
+    regi2c_saradc_enable();
     temperature_sensor_ll_set_range(tsens->tsens_attribute->reg_val);
-    TEMPERATURE_SENSOR_EXIT_CRITICAL();
-    tsens->tsens_hw_state = TSENS_HW_STATE_CONFIGURED;
+    temperature_sensor_ll_enable(false); // disable the sensor by default
+
+    tsens->fsm = TEMP_SENSOR_FSM_INIT;
     *ret_tsens = tsens;
     return ESP_OK;
 err:
@@ -116,52 +112,51 @@ err:
 
 esp_err_t temperature_sensor_uninstall(temperature_sensor_handle_t tsens)
 {
-    ESP_RETURN_ON_FALSE((tsens != NULL), ESP_ERR_INVALID_ARG, TAG, "Has already been uninstalled");
-    ESP_RETURN_ON_FALSE(tsens->tsens_hw_state != TSENS_HW_STATE_STARTED, ESP_ERR_INVALID_STATE, TAG, "Has not been stopped");
+    ESP_RETURN_ON_FALSE((tsens != NULL), ESP_ERR_INVALID_ARG, TAG, "invalid argument");
+    ESP_RETURN_ON_FALSE(tsens->fsm == TEMP_SENSOR_FSM_INIT, ESP_ERR_INVALID_STATE, TAG, "tsens not in init state");
+
     if (s_tsens_attribute_copy) {
         free(s_tsens_attribute_copy);
     }
     s_tsens_attribute_copy = NULL;
-    tsens->tsens_hw_state = TSENS_HW_STATE_UNCONFIGURED;
-    heap_caps_free(tsens);
-    tsens = NULL;
+    regi2c_saradc_disable();
+
+    periph_module_disable(PERIPH_TEMPSENSOR_MODULE);
+    free(tsens);
     return ESP_OK;
 }
 
-esp_err_t temperature_sensor_start(temperature_sensor_handle_t tsens)
+esp_err_t temperature_sensor_enable(temperature_sensor_handle_t tsens)
 {
-    ESP_RETURN_ON_FALSE((tsens != NULL), ESP_ERR_INVALID_ARG, TAG, "Has not been installed");
-    ESP_RETURN_ON_FALSE(tsens->tsens_hw_state == TSENS_HW_STATE_CONFIGURED, ESP_ERR_INVALID_STATE, TAG, "Is already running or has not been configured");
+    ESP_RETURN_ON_FALSE((tsens != NULL), ESP_ERR_INVALID_ARG, TAG, "invalid argument");
+    ESP_RETURN_ON_FALSE(tsens->fsm == TEMP_SENSOR_FSM_INIT, ESP_ERR_INVALID_STATE, TAG, "tsens not in init state");
+
 #if SOC_TEMPERATURE_SENSOR_SUPPORT_FAST_RC
-    if (tsens->clk_src == TEMPERATURE_SENSOR_CLK_SRC_FAST_RC) {
+    if (tsens->clk_src == TEMPERATURE_SENSOR_CLK_SRC_RC_FAST) {
         periph_rtc_dig_clk8m_enable();
     }
 #endif
+
     temperature_sensor_ll_clk_enable(true);
     temperature_sensor_ll_clk_sel(tsens->clk_src);
     temperature_sensor_ll_enable(true);
-    tsens->tsens_hw_state = TSENS_HW_STATE_STARTED;
+    tsens->fsm = TEMP_SENSOR_FSM_ENABLE;
     return ESP_OK;
 }
 
-esp_err_t temperature_sensor_stop(temperature_sensor_handle_t tsens)
+esp_err_t temperature_sensor_disable(temperature_sensor_handle_t tsens)
 {
-    ESP_RETURN_ON_FALSE(tsens->tsens_hw_state == TSENS_HW_STATE_STARTED, ESP_ERR_INVALID_STATE, TAG, "Has not been started");
+    ESP_RETURN_ON_FALSE(tsens, ESP_ERR_INVALID_ARG, TAG, "invalid argument");
+    ESP_RETURN_ON_FALSE(tsens->fsm == TEMP_SENSOR_FSM_ENABLE, ESP_ERR_INVALID_STATE, TAG, "tsens not enabled yet");
+
     temperature_sensor_ll_enable(false);
 #if SOC_TEMPERATURE_SENSOR_SUPPORT_FAST_RC
-    if (tsens->clk_src == TEMPERATURE_SENSOR_CLK_SRC_FAST_RC) {
+    if (tsens->clk_src == TEMPERATURE_SENSOR_CLK_SRC_RC_FAST) {
         periph_rtc_dig_clk8m_disable();
     }
 #endif
-    periph_module_disable(PERIPH_TEMPSENSOR_MODULE);
-    tsens->tsens_hw_state = TSENS_HW_STATE_CONFIGURED;
-    return ESP_OK;
-}
 
-static esp_err_t temp_sensor_read_raw(uint32_t *tsens_out)
-{
-    ESP_RETURN_ON_FALSE(tsens_out != NULL, ESP_ERR_INVALID_ARG, TAG, "No tsens_out specified");
-    *tsens_out = temperature_sensor_ll_get_raw_value();
+    tsens->fsm = TEMP_SENSOR_FSM_INIT;
     return ESP_OK;
 }
 
@@ -187,14 +182,15 @@ esp_err_t temperature_sensor_get_celsius(temperature_sensor_handle_t tsens, floa
 {
     ESP_RETURN_ON_FALSE((tsens != NULL), ESP_ERR_INVALID_ARG, TAG, "Has not been installed");
     ESP_RETURN_ON_FALSE(out_celsius != NULL, ESP_ERR_INVALID_ARG, TAG, "Celsius points to nothing");
-    ESP_RETURN_ON_FALSE(tsens->tsens_hw_state == TSENS_HW_STATE_STARTED, ESP_ERR_INVALID_ARG, TAG, "Has not been started");
-    uint32_t tsens_out = 0;
-    temp_sensor_read_raw(&tsens_out);
-    ESP_LOGV(TAG, "tsens_out %d", tsens_out);
+    ESP_RETURN_ON_FALSE(tsens->fsm == TEMP_SENSOR_FSM_ENABLE, ESP_ERR_INVALID_STATE, TAG, "tsens not enabled yet");
+
+    uint32_t tsens_out = temperature_sensor_ll_get_raw_value();
+    ESP_LOGV(TAG, "tsens_out %"PRIu32, tsens_out);
+
     *out_celsius = parse_temp_sensor_raw_value(tsens_out, tsens->tsens_attribute->offset);
     if (*out_celsius < tsens->tsens_attribute->range_min || *out_celsius > tsens->tsens_attribute->range_max) {
-        ESP_LOGW(TAG, "Temperature range exceeded!");
-        return ESP_ERR_INVALID_STATE;
+        ESP_LOGW(TAG, "value out of range, probably invalid");
+        return ESP_FAIL;
     }
     return ESP_OK;
 }
